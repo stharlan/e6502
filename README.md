@@ -4,7 +4,7 @@ This is my own version of the Ben Eater 6502-on-a-breadboard computer.
 
 Thanks to:
 
-https://eater.net/
+(Ben Eater)[https://eater.net/]
 https://www.arduino.cc/
 https://www.youtube.com/c/BenEater
 https://6502disassembly.com/
