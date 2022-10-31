@@ -1,4 +1,16 @@
 
+; ****************************************
+; * 6502 ROM Image
+; * by Stuart Harlan 2022
+; *
+; * The intent of this ROM is to establish
+; * a bi-directional serial connection
+; * using a 65C22 to commuinicate with an
+; * Arduino MEGA. Commands can be send to
+; * the 6502 and responses will be sent
+; * back.
+; ****************************************
+
 ; variables
 VIAPORTB		= $8000
 VIAPORTA		= $8001
@@ -41,6 +53,14 @@ CBFXEQFLG		= %00000010		; ready to execute flag
 CBFXEQFLGB		= %11111101		; inverse of XEQ flag
 LF				= $0a
 LONIBBLE		= %00001111
+DOLLAR			= '$'
+
+	; Memory map:
+	; $0000 - $7fff = RAM
+	; $8000 - $9fff = 65C22 I/O
+	; $a000 - $ffff = ROM
+
+	; The image starts at $8000 so it's 32K.
 
 	.org $8000
 	.byte $00
@@ -49,7 +69,7 @@ LONIBBLE		= %00001111
 	.org $a000
 
 ; ****************************************
-; * data
+; * constants
 ; ****************************************
 
 TXTRDY:
@@ -60,10 +80,10 @@ TXTDGTS:
 	db '0123456789ABCDEF'
 TXTRDYA		.word TXTRDY
 TXTSNTEA	.word TXTSNTE
-; ****************************************
-; * main loop
-; ****************************************
 
+; ****************************************
+; * main loop (RESET vector)
+; ****************************************
 RESET:
 
 	; for debugging only
@@ -78,8 +98,10 @@ RESET:
 	;sta CBUFN
 	;lda #%00000011
 	;sta CBUFF
+	lda #$55
+	sta $0900
 
-	stz CTP
+	stz CTP			; memory initialization
 	stz CBUFN
 	stz CBUFF
 	stz SOVAL
@@ -93,20 +115,23 @@ RESET:
 	sta VIAIER
 
 	lda #$ff		; set all b pins to output
-	sta VIADDRB		; port b
+	sta VIADDRB		; this is where the 6522 sends
+					; data to the arduino
 
 	stz VIADDRA		; set all a pins to input
+					; this is where the arduino
+					; sends data to the 6522
 
 	cli				; tell processor to respond to interrupts
 
-	lda TXTRDYA	; output serial READY
-	sta ADDR8L
-	lda TXTRDYA+1
-	sta ADDR8H
-	jsr SEROUT
+	lda TXTRDYA		; output ready msg on serial
+	sta ADDR8L		; load the address of the text to ram in 
+	lda TXTRDYA+1	; the zero page
+	sta ADDR8H		; and call SEROUT
+	jsr SEROUT		; to write it to serial
 
 WAIT3:
-	lda CBUFF		; check the execute flag
+	lda CBUFF		; check the execute cmdbuf flag
 	and #CBFXEQFLG
 	beq CONT1		; if not set, continue
 
@@ -137,7 +162,6 @@ CONT1:
 ; ****************************************
 ; * parse cmd buf
 ; ****************************************
-
 PARSECMD:
 	stz PRSFLG		; clear parse flags
 	ldx #$00		; start at cmdbuf zero
@@ -219,10 +243,6 @@ ACASE4:
 	adc ADDR8L
 	sta ADDR8L
 					
-	;ldy #$00		; address is in ADDRHI ADDRLO
-	;lda ($80),Y		; load value from address at 0080 (ADDR8H/ADDR8L)
-					; with no offset
-
 	; for debugging
 	; output low byte and hi byte
 	lda ADDR8L
@@ -233,6 +253,12 @@ ACASE4:
 	sta SOVAL
 	jsr SOBYTE	
 
+	ldy #$00		; address is in ADDRHI ADDRLO
+	lda ($80),Y		; load value from address at 0080 (ADDR8H/ADDR8L)
+					; with no offset
+	sta SOVAL
+	jsr SOBYTE
+	
 	jmp PARSEDONE
 
 PARSEERR:
@@ -246,14 +272,12 @@ PARSEDONE:
 ; * serial out byte
 ; * byte is in SOVAL
 ; ****************************************
-
 SOBYTE:
-	lda SOVAL
-	and #LONIBBLE	; get lower nibble of a	
-	tax				; put nibble in x (0-15)
-	lda TXTDGTS,X	; get digit from digit table offset x
+	lda #DOLLAR		; output a dollar sign
 	sta CTP
-	jsr SEROUTCHAR	; output the char
+	jsr SEROUTCHAR
+
+	; output the high nibble
 
 	lda SOVAL
 	lsr				; shift bits right 4 times
@@ -265,6 +289,15 @@ SOBYTE:
 	lda TXTDGTS,X	; get char
 	sta CTP
 	jsr SEROUTCHAR	; output next char
+
+	; output the lo nibble
+
+	lda SOVAL
+	and #LONIBBLE	; get lower nibble of a	
+	tax				; put nibble in x (0-15)
+	lda TXTDGTS,X	; get digit from digit table offset x
+	sta CTP
+	jsr SEROUTCHAR	; output the char
 
 	lda #LF
 	sta CTP
@@ -315,7 +348,6 @@ SEROUT2:
 ; ****************************************
 ; * serial out char
 ; ****************************************
-
 SEROUTCHAR:
 	lda CTP
 	sta VIAPORTB	; store in b
@@ -333,7 +365,6 @@ WAITIFR:			; wait for data taken signal on INT CB1
 ; ****************************************
 ; * irq handler
 ; ****************************************
-
 ON_NMI:
 ON_IRQ:
 	pha				; push A to stack
@@ -385,6 +416,8 @@ IRQDONE:
 	plx				; retrieve X from stack
 	pla				; retrieve A from stack
 	rti
+
+	; NMI, reset and IRQ vectors
 
 	.org $fffa
 	.word ON_NMI
