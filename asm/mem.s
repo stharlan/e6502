@@ -57,11 +57,14 @@ ADDR8LM			= $100c ; addr low non zero page
 ADDR8HM			= $100d ; addr high non zero page
 CMDBUF			= $1100	; command buffer, 256 bytes $1100 to $11ff
 OUTBUF			= $1200 ; output buffer, 256 bytes $1200 to $12ff
+OUTBUFLB		= $00
+OUTBUFHB		= $12
 
 CBFUNXFLG		= %00000001		; unexected data flag
 CBFUNXFLGB		= %11111110		; inverse of unexected data flag
 CBFXEQFLG		= %00000010		; ready to execute flag
 CBFXEQFLGB		= %11111101		; inverse of XEQ flag
+CR				= $0d
 LF				= $0a
 LONIBBLE		= %00001111
 DOLLAR			= '$'
@@ -140,11 +143,22 @@ RESET:
 
 	cli				; tell processor to respond to interrupts
 
+	; debug
+	;jsr RESETOUTB
+	;lda #XCAP
+	;sta OUTBUFC
+	;jsr ADDOBCHAR
+	;lda #OUTBUFLB	; output OUTBUF low byte
+	;sta ADDR8LB
+	;lda #OUTBUFHB	; output OUTBUF high byte
+	;sta ADDR8HB
+	;jsr SEROUT	
+
 	lda TXTRDYA		; output ready msg on serial
 	sta ADDR8LB		; load the address of the text to ram in 
 	lda TXTRDYA+1	; the zero page
 	sta ADDR8HB		; and call SEROUT
-	jsr SEROUT		; to write it to serial
+	jsr SEROUT		; to write it to serial	
 
 WAIT3:
 	lda CBUFF		; check the execute cmdbuf flag
@@ -308,6 +322,7 @@ ADDOBCHAR:
 	ldx OUTBUFP		; load the next position (0x00-0xfe)
 	sta OUTBUF,X	; store the char in buffer
 	inc OUTBUFP		; increment position
+	ldx OUTBUFP		; load incremented back in x
 	lda #$00
 	sta OUTBUF,X	; store null byte in next pos
 					; this will ensure it always ends
@@ -367,16 +382,14 @@ SOBYTEADDR:
 	sta OUTBUFC
 	jsr ADDOBCHAR	; add lo nibble
 
-	lda #LF
-	sta OUTBUFC
-	jsr ADDOBCHAR	; add linefeed
-
 	; print the buffer
-	lda OUTBUF		; output OUTBUF
+	lda #OUTBUFLB	; output OUTBUF low byte
 	sta ADDR8LB
-	lda OUTBUF+1
+	lda #OUTBUFHB	; output OUTBUF high byte
 	sta ADDR8HB
-	jsr SEROUT	
+	jsr SEROUT
+
+	jsr RESETOUTB	; reset output buffer
 
 	rts
 
@@ -420,25 +433,11 @@ SOBYTE:
 	jsr BYTE2CHAR
 
 	; output the high nibble
-
-	;lda SOVAL
-	;lsr				; shift bits right 4 times
-	;lsr
-	;lsr
-	;lsr
-	;and #LONIBBLE	; get lower nibble of a	
-	;tax				; lower nibble is offset (0-15)
-	;lda TXTDGTS,X	; get char
 	lda B2COUTH
 	sta CTP
 	jsr SEROUTCHAR	; output next char
 
 	; output the lo nibble
-
-	;lda SOVAL
-	;and #LONIBBLE	; get lower nibble of a	
-	;tax				; put nibble in x (0-15)
-	;lda TXTDGTS,X	; get digit from digit table offset x
 	lda B2COUTL
 	sta CTP
 	jsr SEROUTCHAR	; output the char
@@ -484,9 +483,12 @@ SEROUT1:
 	iny				; next char
 	jmp SEROUT1		; loop again
 SEROUT2:
+	lda #CR
+	sta CTP
+	jsr SEROUTCHAR
 	lda #LF
 	sta CTP
-	jsr SEROUTCHAR	; output a linefeed
+	jsr SEROUTCHAR
 	rts
 
 ; ****************************************
@@ -521,6 +523,9 @@ ON_IRQ:
 	lda VIAPORTA	; ARDUINO has a char ready to transmit
 					; load it from VIA into a
 	pha				; push it to the stack
+
+	cmp #CR
+	beq SETEXQ		; set xeq on carriage return
 
 	cmp #LF			; compare to 0x0a
 	beq SETEXQ		; if so, go to set the execute flag
