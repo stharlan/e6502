@@ -67,21 +67,21 @@ TXTSNTEA	.word TXTSNTE
 RESET:
 
 	; for debugging only
-	lda #$64
-	sta CMDBUF
-	lda #$30
-	sta CMDBUF+1
-	sta CMDBUF+2
-	sta CMDBUF+3
-	sta CMDBUF+4
-	lda #$05
-	sta CBUFN
-	lda #%00000011
-	sta CBUFF
+	;lda #$64
+	;sta CMDBUF
+	;lda #$30
+	;sta CMDBUF+1
+	;sta CMDBUF+2
+	;sta CMDBUF+3
+	;sta CMDBUF+4
+	;lda #$05
+	;sta CBUFN
+	;lda #%00000011
+	;sta CBUFF
 
 	stz CTP
-	;stz CBUFN
-	;stz CBUFF
+	stz CBUFN
+	stz CBUFF
 	stz SOVAL
 
 	lda #%10101010	; setup pcr for serial out on a and b
@@ -99,11 +99,11 @@ RESET:
 
 	cli				; tell processor to respond to interrupts
 
-	;lda TXTRDYA	; output serial READY
-	;sta ADDR8L
-	;lda TXTRDYA+1
-	;sta ADDR8H
-	;jsr SEROUT
+	lda TXTRDYA	; output serial READY
+	sta ADDR8L
+	lda TXTRDYA+1
+	sta ADDR8H
+	jsr SEROUT
 
 WAIT3:
 	lda CBUFF		; check the execute flag
@@ -223,6 +223,8 @@ ACASE4:
 	;lda ($80),Y		; load value from address at 0080 (ADDR8H/ADDR8L)
 					; with no offset
 
+	; for debugging
+	; output low byte and hi byte
 	lda ADDR8L
 	sta SOVAL
 	jsr SOBYTE	
