@@ -31,30 +31,47 @@ VIAPORTA_NOH	= $800f
 
 VIAIFRCA1		= %00000010
 VIAIFRCB1		= %00010000
-PRSFLGERR		= %00000001
 
 ADDR8LZ			= $0080	; addr low zero page
 ADDR8HZ			= $0081 ; addr high zero page
 ADDR8LB			= $0082 ; addr low for print buffer (SEROUT)
 ADDR8HB			= $0083 ; addr high for print buffer (SEROUT)
 
-CTP				= $1000	; char to print
-CBUFN			= $1001 ; num chars in cmdbuf
-CBUFF			= $1002	; cmd buffer flags
+CBUFN			= $1000 ; num chars in cmdbuf
+CBUFF			= $1001	; cmd buffer flags
 						; bit 0: 1 = unexecuted data in buffer
 						; bit 1: 1 = ready to execute
-PCS1			= $1003	; parse char temp storage
-SOVAL			= $1004 ; the byte value to output to serial
-STP				= $1005 ; the LO byte addr location for serial out
-PRSFLG			= $1006 ; cmd parse flags
+PCS1			= $1002	; parse char temp storage
+SOVAL			= $1003 ; the byte value to output to serial
+STP				= $1004 ; the LO byte addr location for serial out
+PRS16B			= $1005 ; cmd parse flags
 						; bit 0: 1 error; 0 no error
-OUTBUFP			= $1007 ; output buffer position
-OUTBUFC			= $1008 ; temp char for output buffer processing
-B2CIN			= $1009 ; byte to char input
-B2COUTH			= $100a ; byte to char high nibble
-B2COUTL			= $100b ; byte to char lo nibble
-ADDR8LM			= $100c ; addr low non zero page
-ADDR8HM			= $100d ; addr high non zero page
+						; bit 1: 1 16 bytes per line; 0 1 byte per line
+OUTBUFP			= $1006 ; output buffer position
+OUTBUFC			= $1007 ; temp char for output buffer processing
+B2CIN			= $1008 ; byte to char input
+B2COUTH			= $1009 ; byte to char high nibble
+B2COUTL			= $100a ; byte to char lo nibble
+ADDR8LM			= $100b ; addr low non zero page
+ADDR8HM			= $100c ; addr high non zero page
+
+ARG0			= $1010
+ARG1			= $1011
+ARG2			= $1012
+ARG3			= $1013
+ARG4			= $1014
+ARG5			= $1015
+ARG6			= $1016
+ARG7			= $1017
+ARG8			= $1018
+ARG9			= $1019
+ARGA			= $101A
+ARGB			= $101B
+ARGC			= $101C
+ARGD			= $101D
+ARGE			= $101E
+RERR			= $101F
+
 CMDBUF			= $1100	; command buffer, 256 bytes $1100 to $11ff
 OUTBUF			= $1200 ; output buffer, 256 bytes $1200 to $12ff
 OUTBUFLB		= $00
@@ -118,12 +135,14 @@ RESET:
 	lda #$55
 	sta $0900
 
-	stz CTP			; Characer To Print
 	stz CBUFN		; num of chars in cmd buffer
+	stz CMDBUF		; first char is zero
 	stz CBUFF		; command buffer flags
 	stz SOVAL		; Serial Output VALue
 	stz OUTBUF		; OUTput BUFfer
 	stz OUTBUFP		; OUTput BUFfer Position
+	stz PRS16B		; parse flag
+	stz RERR		; clear error
 
 	lda #%10101010	; setup pcr for serial out on a and b
 					; pulse output (101) bits 3,2,1
@@ -171,8 +190,7 @@ WAIT3:
 	;jsr SOCMDBUF	; serial out cmd buf
 
 	jsr PARSECMD	; parse the cmd buf
-	lda PRSFLG
-	and PRSFLGERR	; check for parse error
+	lda RERR
 	beq CONT2		; no error, go on
 
 	; output syntax error
@@ -193,7 +211,8 @@ CONT1:
 ; * parse cmd buf
 ; ****************************************
 PARSECMD:
-	stz PRSFLG		; clear parse flags
+	stz PRS16B		; clear parse flags 16B
+	stz RERR		; clear error
 	ldx #$00		; start at cmdbuf zero
 	lda CMDBUF,X	; load character
 	cmp #$64		; d = dump memory
@@ -206,7 +225,7 @@ CMDDUMP:
 	lda CMDBUF,X	; load next char in buffer
 	sta PCS1		; store in PCS1
 
-CMDDUMP1:
+PRSNEXTCHAR:
 	lda TXTDGTS,Y	; get the digit char at index y
 	cmp PCS1		; compare digit char to current char
 	bne CMDDUMP2	; not equal, next one
@@ -226,13 +245,13 @@ CMDDUMP1:
 	lda CMDBUF,X	; get char
 	sta PCS1		; store the current char
 	ldy #$00		; first digit
-	jmp CMDDUMP1
+	jmp PRSNEXTCHAR
 
 CMDDUMP2:
 	iny				; increment digit y
 	cpy #$10		; compare to 0x10 (digits 0x00 through 0x0f)
 	beq PARSEERR	; if past 0x0f, abort parse
-	jmp CMDDUMP1	; go back and compare again
+	jmp PRSNEXTCHAR	; go back and compare again
 
 ACASE2:
 	cpx #$02
@@ -246,7 +265,7 @@ ACASE2:
 	lda CMDBUF,X	; get char
 	sta PCS1		; store the current char
 	ldy #$00		; first digit
-	jmp CMDDUMP1
+	jmp PRSNEXTCHAR
 
 ACASE3:
 	cpx #$03
@@ -262,7 +281,7 @@ ACASE3:
 	lda CMDBUF,X	; get char
 	sta PCS1		; store the current char
 	ldy #$00
-	jmp CMDDUMP1
+	jmp PRSNEXTCHAR
 
 ACASE4:
 	cpx #$04
@@ -270,33 +289,43 @@ ACASE4:
 
 	tya
 	clc				; clear carry flag
-	adc ADDR8LZ
-	sta ADDR8LZ
-	sta ADDR8LM		; also store in LM
+	adc ADDR8LZ		; add lo byte to hi byte
+	sta ADDR8LZ		; store in ADDR8LZ, used by lda below
+	sta ADDR8LM		; also store in LM so we can print the address
+					; used by SOBYTEADDR
 
-	lda ADDR8HZ
-	sta ADDR8HM		; also store in HM		
+	lda ADDR8HZ		; used by lda below
+	sta ADDR8HM		; also store in HM so we can print the address
+					; used by SOBYTEADDR
 
 	; get the value at that address and
 	; store in SOVAL so we can output
 
 	ldy #$00		; address is in ADDRHI ADDRLO
-	lda ($80),Y		; load value from address at 0080 (ADDR8HZ/ADDR8LZ)
+	lda (ADDR8LZ),Y	; load value from address at 0080 (ADDR8HZ/ADDR8LZ)
 					; with no offset
 	sta SOVAL
 
-	; addr8l and addr8h are already populated
-	; so just call SYBYTEADDR to output
+	inx				; look at the next buffer char
+					; should be char 5 if we got this far
+	lda CMDBUF,X	; get char
+	cmp #COLON		; is it a colon
+	bne	PRSPRNTRDY	; no? print
 
-	jsr SOBYTEADDR
-	
-	jmp PARSEDONE
+	inc PRS16B		; set 16B
+
+PRSPRNTRDY:
+	; addr8l and addr8h are already populated
+	; so just call SOBYTEADDR to output
+	jsr SOBYTEADDR	; print byte with addr
+	jmp PARSEDONE	; parse done
 
 PARSEERR:
-	inc PRSFLG		; an error has occurred
+	inc RERR
 
 PARSEDONE:
 	stz CBUFN		; reset cmd buffer
+	stz CMDBUF		; first char is zero
 	rts
 
 ; ****************************************
@@ -382,6 +411,52 @@ SOBYTEADDR:
 	sta OUTBUFC
 	jsr ADDOBCHAR	; add lo nibble
 
+	cmp PRS16B
+	beq SBAPRINT	; if no 16 byte flag, just print
+
+	; add 15 more bytes to print buffer
+	
+	lda ADDR8HM		; store the address in zero page memory
+	sta ADDR8HB
+	lda ADDR8LM
+	sta ADDR8LB
+	
+	lda #SPACE
+	sta OUTBUFC
+	jsr ADDOBCHAR	; add space
+
+	ldy #$01		; start with offset 1
+SBANEXTB:
+	lda (ADDR8LB),Y	; load the character at offset y
+	phy				; store y
+	sta B2CIN
+	jsr BYTE2CHAR
+	lda B2COUTH
+	sta OUTBUFC
+	jsr ADDOBCHAR	; add high nibble
+	lda B2COUTL
+	sta OUTBUFC
+	jsr ADDOBCHAR	; add lo nibble
+
+	lda #SPACE
+	sta OUTBUFC
+	jsr ADDOBCHAR	; add space
+
+	ply				; get y back
+	iny
+	cpy #$08		; if 8, add two spaces
+	bne SBANEXTB1
+
+	lda #SPACE
+	sta OUTBUFC
+	jsr ADDOBCHAR	; add another space
+
+SBANEXTB1:
+	cpy #$10
+	beq SBAPRINT	; done, go to print
+	jmp SBANEXTB
+
+SBAPRINT:
 	; print the buffer
 	lda #OUTBUFLB	; output OUTBUF low byte
 	sta ADDR8LB
@@ -424,8 +499,11 @@ BYTE2CHAR:
 ; * byte is in SOVAL
 ; ****************************************
 SOBYTE:
+	lda ARG0
+	pha				; push ARG0 to stack
+
 	lda #DOLLAR		; output a dollar sign
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR
 
 	lda SOVAL
@@ -434,39 +512,47 @@ SOBYTE:
 
 	; output the high nibble
 	lda B2COUTH
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR	; output next char
 
 	; output the lo nibble
 	lda B2COUTL
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR	; output the char
 
 	lda #LF
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR	; output a linefeed
 
+	pla
+	sta ARG0
 	rts
 
 ; ****************************************
 ; * serial out CMDBUF
 ; ****************************************
 SOCMDBUF:
+	lda ARG0
+	pha				; push ARG0 to stack
+
 	ldx #$00		; start at char 0
 SOCMDBUF1:
 	lda CBUFN		; check chars in cmdbuf
 	beq SOCMDBUF2	; if none, quit
 
 	lda CMDBUF,X	; load next char into a
-	sta CTP			; store into CTP memory
+	sta ARG0		; store into ARG0 memory
 	jsr SEROUTCHAR	; send to serial out
 	dec CBUFN		; decrement num chars in cmdbuf
 	inx				; increment char position
 	jmp SOCMDBUF1	; loop again
 SOCMDBUF2:
 	lda #LF
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR	; output a linefeed
+
+	pla
+	sta ARG0
 	rts
 
 ; ****************************************
@@ -474,28 +560,35 @@ SOCMDBUF2:
 ; * location of text is ADDR8LB/ADDR8HB
 ; ****************************************
 SEROUT:
+	lda ARG0
+	pha				; push ARG0 to stack
+
 	ldy #$00		; start at char 0
 SEROUT1:
 	lda (ADDR8LB),Y	; load next char into a
 	beq SEROUT2		; if a = 0 (end of string) -> done
-	sta CTP			; store into CTP memory
+	sta ARG0		; store into ARG0 memory
 	jsr SEROUTCHAR	; send to serial out
 	iny				; next char
 	jmp SEROUT1		; loop again
 SEROUT2:
 	lda #CR
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR
 	lda #LF
-	sta CTP
+	sta ARG0
 	jsr SEROUTCHAR
+
+	pla
+	sta ARG0
 	rts
 
 ; ****************************************
 ; * serial out char
+; * char to serial out is in ARG0
 ; ****************************************
 SEROUTCHAR:
-	lda CTP
+	lda ARG0
 	sta VIAPORTB	; store in b
 
 WAITIFR:			; wait for data taken signal on INT CB1
@@ -539,6 +632,11 @@ ON_IRQ:
 	pla				; get the char from the stack
 	sta CMDBUF,X	; store the char in the cmd buf
 	inc CBUFN		; increment num chars in cmd buf
+
+	ldx CBUFN		; refresh x from CBUFN after inc
+	lda #$00		; load 00 into a
+	sta CMDBUF,X	; store in cmdbuf at offset x
+					; always make sure last char in cmdbuf is 0x00
 
 	lda CBUFF		; set the un-executed data bit in cmd buffer flags
 	ora #CBFUNXFLG
