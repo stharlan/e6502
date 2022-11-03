@@ -48,7 +48,6 @@ PRS16B			= $1005 ; cmd parse flags
 						; bit 0: 1 error; 0 no error
 						; bit 1: 1 16 bytes per line; 0 1 byte per line
 OUTBUFP			= $1006 ; output buffer position
-OUTBUFC			= $1007 ; temp char for output buffer processing
 B2CIN			= $1008 ; byte to char input
 B2COUTH			= $1009 ; byte to char high nibble
 B2COUTL			= $100a ; byte to char lo nibble
@@ -208,7 +207,8 @@ CONT1:
 	jmp WAIT3		; loop forever
 
 ; ****************************************
-; * parse cmd buf
+; * parse cmd buf - no args
+; * uses CMDBUF and doesn't return anything
 ; ****************************************
 PARSECMD:
 	stz PRS16B		; clear parse flags 16B
@@ -330,6 +330,7 @@ PARSEDONE:
 
 ; ****************************************
 ; * reset output buffer
+; * no args, no returns
 ; ****************************************
 RESETOUTB:
 	stz OUTBUFP
@@ -338,6 +339,7 @@ RESETOUTB:
 
 ; ****************************************
 ; * add byte to output buffer 
+; * ARG0 the byte to add to the buffer
 ; ****************************************
 ADDOBCHAR:
 	lda #$ff
@@ -347,7 +349,7 @@ ADDOBCHAR:
 	beq ADDOBCHAR1	; so, if the current position is 0xff
 					; ignore this request and return
 
-	lda OUTBUFC		; load the character from memory
+	lda ARG0		; load the character from memory
 	ldx OUTBUFP		; load the next position (0x00-0xfe)
 	sta OUTBUF,X	; store the char in buffer
 	inc OUTBUFP		; increment position
@@ -367,7 +369,7 @@ ADDOBCHAR1:
 ; ****************************************
 SOBYTEADDR:
 	lda #DOLLAR
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add dollar sign
 
 	; address high
@@ -375,10 +377,10 @@ SOBYTEADDR:
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
 	lda B2COUTL
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
 	; address low
@@ -386,18 +388,18 @@ SOBYTEADDR:
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
 	lda B2COUTL
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
 	lda #COLON
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add colon
 
 	lda #SPACE
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add space
 
 	; SOVAL byte
@@ -405,10 +407,10 @@ SOBYTEADDR:
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
 	lda B2COUTL
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
 	cmp PRS16B
@@ -422,7 +424,7 @@ SOBYTEADDR:
 	sta ADDR8LB
 	
 	lda #SPACE
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add space
 
 	ldy #$01		; start with offset 1
@@ -432,14 +434,14 @@ SBANEXTB:
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
 	lda B2COUTL
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
 	lda #SPACE
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add space
 
 	ply				; get y back
@@ -448,7 +450,7 @@ SBANEXTB:
 	bne SBANEXTB1
 
 	lda #SPACE
-	sta OUTBUFC
+	sta ARG0
 	jsr ADDOBCHAR	; add another space
 
 SBANEXTB1:
