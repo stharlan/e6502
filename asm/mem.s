@@ -44,15 +44,10 @@ CBUFF			= $1001	; cmd buffer flags
 PCS1			= $1002	; parse char temp storage
 SOVAL			= $1003 ; the byte value to output to serial
 STP				= $1004 ; the LO byte addr location for serial out
-PRS16B			= $1005 ; cmd parse flags
-						; bit 0: 1 error; 0 no error
-						; bit 1: 1 16 bytes per line; 0 1 byte per line
 OUTBUFP			= $1006 ; output buffer position
 B2CIN			= $1008 ; byte to char input
 B2COUTH			= $1009 ; byte to char high nibble
 B2COUTL			= $100a ; byte to char lo nibble
-ADDR8LM			= $100b ; addr low non zero page
-ADDR8HM			= $100c ; addr high non zero page
 
 ARG0			= $1010
 ARG1			= $1011
@@ -140,7 +135,6 @@ RESET:
 	stz SOVAL		; Serial Output VALue
 	stz OUTBUF		; OUTput BUFfer
 	stz OUTBUFP		; OUTput BUFfer Position
-	stz PRS16B		; parse flag
 	stz RERR		; clear error
 
 	lda #%10101010	; setup pcr for serial out on a and b
@@ -211,7 +205,6 @@ CONT1:
 ; * uses CMDBUF and doesn't return anything
 ; ****************************************
 PARSECMD:
-	stz PRS16B		; clear parse flags 16B
 	stz RERR		; clear error
 	ldx #$00		; start at cmdbuf zero
 	lda CMDBUF,X	; load character
@@ -291,11 +284,11 @@ ACASE4:
 	clc				; clear carry flag
 	adc ADDR8LZ		; add lo byte to hi byte
 	sta ADDR8LZ		; store in ADDR8LZ, used by lda below
-	sta ADDR8LM		; also store in LM so we can print the address
+	sta ARG1		; also store in ARG1 so we can print the address
 					; used by SOBYTEADDR
 
 	lda ADDR8HZ		; used by lda below
-	sta ADDR8HM		; also store in HM so we can print the address
+	sta ARG0		; also store in ARG0 so we can print the address
 					; used by SOBYTEADDR
 
 	; get the value at that address and
@@ -304,15 +297,16 @@ ACASE4:
 	ldy #$00		; address is in ADDRHI ADDRLO
 	lda (ADDR8LZ),Y	; load value from address at 0080 (ADDR8HZ/ADDR8LZ)
 					; with no offset
-	sta SOVAL
+	sta ARG2		; byte to print
 
+	stz ARG3		; zero out 16 byte flag 
 	inx				; look at the next buffer char
 					; should be char 5 if we got this far
 	lda CMDBUF,X	; get char
 	cmp #COLON		; is it a colon
 	bne	PRSPRNTRDY	; no? print
 
-	inc PRS16B		; set 16B
+	inc ARG3		; set flag to print 16 bytes
 
 PRSPRNTRDY:
 	; addr8l and addr8h are already populated
@@ -366,14 +360,23 @@ ADDOBCHAR1:
 ; * SOBYTEADDR - ads address
 ; * Output in the format:
 ; *   $XXXX: XX
+; * ARG0 - address high byte
+; *      - put in ARG4 so ARG0 can be used
+; * ARG1 - address lo byte
+; * ARG2 - byte at address
+; * ARG3 - show 16 bytes?
 ; ****************************************
 SOBYTEADDR:
+	lda ARG0
+	sta ARG4		; put ARG0 in ARG4
+					; to free up ARG0 for other use
+
 	lda #DOLLAR
 	sta ARG0
 	jsr ADDOBCHAR	; add dollar sign
 
 	; address high
-	lda ADDR8HM		; convert ADDR8HM to chars
+	lda ARG4		; convert high byte address to chars
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
@@ -384,7 +387,7 @@ SOBYTEADDR:
 	jsr ADDOBCHAR	; add lo nibble
 
 	; address low
-	lda ADDR8LM		; convert ADDR8HM to chars
+	lda ARG1		; convert lo byte address to chars
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
@@ -403,7 +406,7 @@ SOBYTEADDR:
 	jsr ADDOBCHAR	; add space
 
 	; SOVAL byte
-	lda SOVAL		; convert SOVAL to chars
+	lda ARG2		; convert byte at address to chars
 	sta B2CIN
 	jsr BYTE2CHAR
 	lda B2COUTH
@@ -413,14 +416,14 @@ SOBYTEADDR:
 	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
-	cmp PRS16B
+	cmp ARG3
 	beq SBAPRINT	; if no 16 byte flag, just print
 
 	; add 15 more bytes to print buffer
 	
-	lda ADDR8HM		; store the address in zero page memory
+	lda ARG4		; store high byte in zero page
 	sta ADDR8HB
-	lda ADDR8LM
+	lda ARG1		; store low byte in zero page
 	sta ADDR8LB
 	
 	lda #SPACE
