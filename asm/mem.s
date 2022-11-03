@@ -42,12 +42,11 @@ CBUFF			= $1001	; cmd buffer flags
 						; bit 0: 1 = unexecuted data in buffer
 						; bit 1: 1 = ready to execute
 PCS1			= $1002	; parse char temp storage
-SOVAL			= $1003 ; the byte value to output to serial
 STP				= $1004 ; the LO byte addr location for serial out
 OUTBUFP			= $1006 ; output buffer position
-B2CIN			= $1008 ; byte to char input
-B2COUTH			= $1009 ; byte to char high nibble
-B2COUTL			= $100a ; byte to char lo nibble
+;B2CIN			= $1008 ; byte to char input
+;B2COUTH			= $1009 ; byte to char high nibble
+;B2COUTL			= $100a ; byte to char lo nibble
 
 ARG0			= $1010
 ARG1			= $1011
@@ -132,7 +131,6 @@ RESET:
 	stz CBUFN		; num of chars in cmd buffer
 	stz CMDBUF		; first char is zero
 	stz CBUFF		; command buffer flags
-	stz SOVAL		; Serial Output VALue
 	stz OUTBUF		; OUTput BUFfer
 	stz OUTBUFP		; OUTput BUFfer Position
 	stz RERR		; clear error
@@ -292,7 +290,7 @@ ACASE4:
 					; used by SOBYTEADDR
 
 	; get the value at that address and
-	; store in SOVAL so we can output
+	; store in ARG2? so we can output
 
 	ldy #$00		; address is in ADDRHI ADDRLO
 	lda (ADDR8LZ),Y	; load value from address at 0080 (ADDR8HZ/ADDR8LZ)
@@ -368,8 +366,11 @@ ADDOBCHAR1:
 ; ****************************************
 SOBYTEADDR:
 	lda ARG0
-	sta ARG4		; put ARG0 in ARG4
-					; to free up ARG0 for other use
+	sta ARG4
+	lda ARG1
+	sta ARG5
+	lda ARG2
+	sta ARG6
 
 	lda #DOLLAR
 	sta ARG0
@@ -377,23 +378,23 @@ SOBYTEADDR:
 
 	; address high
 	lda ARG4		; convert high byte address to chars
-	sta B2CIN
+	sta ARG0
 	jsr BYTE2CHAR
-	lda B2COUTH
+	lda ARG1
 	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
-	lda B2COUTL
+	lda ARG2
 	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
 	; address low
-	lda ARG1		; convert lo byte address to chars
-	sta B2CIN
+	lda ARG5		; convert lo byte address to chars
+	sta ARG0
 	jsr BYTE2CHAR
-	lda B2COUTH
+	lda ARG1
 	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
-	lda B2COUTL
+	lda ARG2
 	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
@@ -405,14 +406,13 @@ SOBYTEADDR:
 	sta ARG0
 	jsr ADDOBCHAR	; add space
 
-	; SOVAL byte
-	lda ARG2		; convert byte at address to chars
-	sta B2CIN
+	lda ARG6		; convert byte at address to chars
+	sta ARG0
 	jsr BYTE2CHAR
-	lda B2COUTH
+	lda ARG1
 	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
-	lda B2COUTL
+	lda ARG2
 	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
@@ -423,7 +423,7 @@ SOBYTEADDR:
 	
 	lda ARG4		; store high byte in zero page
 	sta ADDR8HB
-	lda ARG1		; store low byte in zero page
+	lda ARG5		; store low byte in zero page
 	sta ADDR8LB
 	
 	lda #SPACE
@@ -434,12 +434,12 @@ SOBYTEADDR:
 SBANEXTB:
 	lda (ADDR8LB),Y	; load the character at offset y
 	phy				; store y
-	sta B2CIN
+	sta ARG0
 	jsr BYTE2CHAR
-	lda B2COUTH
+	lda ARG1
 	sta ARG0
 	jsr ADDOBCHAR	; add high nibble
-	lda B2COUTL
+	lda ARG2
 	sta ARG0
 	jsr ADDOBCHAR	; add lo nibble
 
@@ -475,11 +475,15 @@ SBAPRINT:
 
 ; ****************************************
 ; * BYTE 2 CHAR
+; * ARG0 - the byte to convert
+; * ARG1 - the high nibble char to return
+; * ARG2 - the low nibble char to return
 ; ****************************************
 BYTE2CHAR:
 	; output the high nibble
 
-	lda B2CIN
+	;lda B2CIN
+	lda ARG0
 	lsr				; shift bits right 4 times
 	lsr
 	lsr
@@ -487,21 +491,24 @@ BYTE2CHAR:
 	and #LONIBBLE	; get lower nibble of a	
 	tax				; lower nibble is offset (0-15)
 	lda TXTDGTS,X	; get char
-	sta B2COUTH
+	;sta B2COUTH
+	sta ARG1
 
 	; output the lo nibble
 
-	lda B2CIN
+	;lda B2CIN
+	lda ARG0
 	and #LONIBBLE	; get lower nibble of a	
 	tax				; put nibble in x (0-15)
 	lda TXTDGTS,X	; get digit from digit table offset x
-	sta B2COUTL
+	;sta B2COUTL
+	sta ARG2
 
 	rts
 
 ; ****************************************
 ; * serial out byte
-; * byte is in SOVAL
+; * ARG0 - byte (formerly SOVAL)
 ; ****************************************
 SOBYTE:
 	lda ARG0
@@ -511,17 +518,17 @@ SOBYTE:
 	sta ARG0
 	jsr SEROUTCHAR
 
-	lda SOVAL
-	sta B2CIN
+	pla
+	sta ARG0
 	jsr BYTE2CHAR
 
 	; output the high nibble
-	lda B2COUTH
+	lda ARG1
 	sta ARG0
 	jsr SEROUTCHAR	; output next char
 
 	; output the lo nibble
-	lda B2COUTL
+	lda ARG2
 	sta ARG0
 	jsr SEROUTCHAR	; output the char
 
