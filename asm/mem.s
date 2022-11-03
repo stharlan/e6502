@@ -41,9 +41,7 @@ CBUFN			= $1000 ; num chars in cmdbuf
 CBUFF			= $1001	; cmd buffer flags
 						; bit 0: 1 = unexecuted data in buffer
 						; bit 1: 1 = ready to execute
-PCS1			= $1002	; parse char temp storage
-STP				= $1004 ; the LO byte addr location for serial out
-OUTBUFP			= $1006 ; output buffer position
+OUTBUFP			= $1002 ; output buffer position
 
 ARG0			= $1010
 ARG1			= $1011
@@ -186,11 +184,11 @@ CMDDUMP:
 	inx				; increase char pos
 	ldy #$00		; first digit
 	lda CMDBUF,X	; load next char in buffer
-	sta PCS1		; store in PCS1
+	sta ARG0		; store in ARG0
 
 PRSNEXTCHAR:
 	lda TXTDGTS,Y	; get the digit char at index y
-	cmp PCS1		; compare digit char to current char
+	cmp ARG0		; compare digit char to current char
 	bne CMDDUMP2	; not equal, next one
 					; y contains the position of the char 0-f
 					; if this is high nibble, left shift 4 times
@@ -206,7 +204,7 @@ PRSNEXTCHAR:
 	sta ADDR8HZ		; store in addr high
 	inx				; next buffer char
 	lda CMDBUF,X	; get char
-	sta PCS1		; store the current char
+	sta ARG0		; store the current char
 	ldy #$00		; first digit
 	jmp PRSNEXTCHAR
 
@@ -226,7 +224,7 @@ ACASE2:
 	sta ADDR8HZ		; store back in ADDRHI
 	inx				; next buffer char
 	lda CMDBUF,X	; get char
-	sta PCS1		; store the current char
+	sta ARG0		; store the current char
 	ldy #$00		; first digit
 	jmp PRSNEXTCHAR
 
@@ -242,7 +240,7 @@ ACASE3:
 	sta ADDR8LZ
 	inx
 	lda CMDBUF,X	; get char
-	sta PCS1		; store the current char
+	sta ARG0		; store the current char
 	ldy #$00
 	jmp PRSNEXTCHAR
 
