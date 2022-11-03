@@ -44,9 +44,6 @@ CBUFF			= $1001	; cmd buffer flags
 PCS1			= $1002	; parse char temp storage
 STP				= $1004 ; the LO byte addr location for serial out
 OUTBUFP			= $1006 ; output buffer position
-;B2CIN			= $1008 ; byte to char input
-;B2COUTH			= $1009 ; byte to char high nibble
-;B2COUTL			= $100a ; byte to char lo nibble
 
 ARG0			= $1010
 ARG1			= $1011
@@ -113,18 +110,6 @@ TXTSNTEA	.word TXTSNTE
 ; ****************************************
 RESET:
 
-	; for debugging only
-	;lda #$64
-	;sta CMDBUF
-	;lda #$30
-	;sta CMDBUF+1
-	;sta CMDBUF+2
-	;sta CMDBUF+3
-	;sta CMDBUF+4
-	;lda #$05
-	;sta CBUFN
-	;lda #%00000011
-	;sta CBUFF
 	lda #$55
 	sta $0900
 
@@ -153,21 +138,10 @@ RESET:
 
 	cli				; tell processor to respond to interrupts
 
-	; debug
-	;jsr RESETOUTB
-	;lda #XCAP
-	;sta OUTBUFC
-	;jsr ADDOBCHAR
-	;lda #OUTBUFLB	; output OUTBUF low byte
-	;sta ADDR8LB
-	;lda #OUTBUFHB	; output OUTBUF high byte
-	;sta ADDR8HB
-	;jsr SEROUT	
-
 	lda TXTRDYA		; output ready msg on serial
-	sta ADDR8LB		; load the address of the text to ram in 
+	sta ARG0		; lobyte 
 	lda TXTRDYA+1	; the zero page
-	sta ADDR8HB		; and call SEROUT
+	sta ARG1		; hibyte
 	jsr SEROUT		; to write it to serial	
 
 WAIT3:
@@ -178,8 +152,6 @@ WAIT3:
 	lda CBUFN		; check if data in cmdbuf
 	beq CONT1		; if no, continue
 
-	;jsr SOCMDBUF	; serial out cmd buf
-
 	jsr PARSECMD	; parse the cmd buf
 	lda RERR
 	beq CONT2		; no error, go on
@@ -187,9 +159,9 @@ WAIT3:
 	; output syntax error
 
 	lda TXTSNTEA	; output syntax error msg
-	sta ADDR8LB
+	sta ARG0		; lobyte
 	lda TXTSNTEA+1
-	sta ADDR8HB
+	sta ARG1		; hibyte
 	jsr SEROUT	
 
 CONT2:
@@ -464,9 +436,9 @@ SBANEXTB1:
 SBAPRINT:
 	; print the buffer
 	lda #OUTBUFLB	; output OUTBUF low byte
-	sta ADDR8LB
+	sta ARG0
 	lda #OUTBUFHB	; output OUTBUF high byte
-	sta ADDR8HB
+	sta ARG1
 	jsr SEROUT
 
 	jsr RESETOUTB	; reset output buffer
@@ -482,7 +454,6 @@ SBAPRINT:
 BYTE2CHAR:
 	; output the high nibble
 
-	;lda B2CIN
 	lda ARG0
 	lsr				; shift bits right 4 times
 	lsr
@@ -491,17 +462,14 @@ BYTE2CHAR:
 	and #LONIBBLE	; get lower nibble of a	
 	tax				; lower nibble is offset (0-15)
 	lda TXTDGTS,X	; get char
-	;sta B2COUTH
 	sta ARG1
 
 	; output the lo nibble
 
-	;lda B2CIN
 	lda ARG0
 	and #LONIBBLE	; get lower nibble of a	
 	tax				; put nibble in x (0-15)
 	lda TXTDGTS,X	; get digit from digit table offset x
-	;sta B2COUTL
 	sta ARG2
 
 	rts
@@ -542,11 +510,9 @@ SOBYTE:
 
 ; ****************************************
 ; * serial out CMDBUF
+; * no args; uses CMDBUF and CMDBUFN
 ; ****************************************
 SOCMDBUF:
-	lda ARG0
-	pha				; push ARG0 to stack
-
 	ldx #$00		; start at char 0
 SOCMDBUF1:
 	lda CBUFN		; check chars in cmdbuf
@@ -563,17 +529,19 @@ SOCMDBUF2:
 	sta ARG0
 	jsr SEROUTCHAR	; output a linefeed
 
-	pla
-	sta ARG0
 	rts
 
 ; ****************************************
 ; * serial out
 ; * location of text is ADDR8LB/ADDR8HB
+; * ARG0 - lo byte of addr
+; * ARG1 - hi byte of addr
 ; ****************************************
 SEROUT:
 	lda ARG0
-	pha				; push ARG0 to stack
+	sta ADDR8LB
+	lda ARG1
+	sta ADDR8HB
 
 	ldy #$00		; start at char 0
 SEROUT1:
@@ -591,13 +559,11 @@ SEROUT2:
 	sta ARG0
 	jsr SEROUTCHAR
 
-	pla
-	sta ARG0
 	rts
 
 ; ****************************************
 ; * serial out char
-; * char to serial out is in ARG0
+; * ARG0 - char to serial out is in ARG0
 ; ****************************************
 SEROUTCHAR:
 	lda ARG0
