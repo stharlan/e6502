@@ -118,6 +118,34 @@ RESET:
 	stz OUTBUFP		; OUTput BUFfer Position
 	stz RERR		; clear error
 
+	; debug
+	;lda #'d'
+	;sta $1100
+	;lda #'0'
+	;sta $1101
+	;lda #'0'
+	;sta $1102
+	;lda #'0'
+	;sta $1103
+	;lda #'0'
+	;sta $1104
+	;lda #':'
+	;sta $1105
+	;lda #'0'
+	;sta $1106
+	;lda #'0'
+	;sta $1107
+	;lda #'0'
+	;sta $1108
+	;lda #'0'
+	;sta $1109
+	;lda #$00
+	;sta $1107
+	;lda #$07
+	;sta CBUFN
+	;lda #%00000011
+	;sta CBUFF
+
 	lda #%10101010	; setup pcr for serial out on a and b
 					; pulse output (101) bits 3,2,1
 					; negative active edge (0) bit 0
@@ -194,8 +222,12 @@ PARSEADDR2:
 					; if this is high nibble, left shift 4 times
 
 	cpx #$01		; are we on digit 1?
-	bne PARSEADDR4	; if not digit one, move on
+	beq PA1
+	cpx #$06
+	beq PA1
+	jmp PARSEADDR4	; if not digit one, move on
 					; digit 1 is high byte
+PA1:
 	tya				; transfer y to a (y is 0-f)
 	asl
 	asl
@@ -216,8 +248,11 @@ PARSEADDR3:
 
 PARSEADDR4:
 	cpx #$02
-	bne PARSEADDR5
-
+	beq PA2
+	cpx #$07
+	beq PA2
+	jmp PARSEADDR5
+PA2:
 	tya
 	clc				; clear carry flag
 	adc ARG1		; add low nibble to ADDRHI
@@ -230,8 +265,11 @@ PARSEADDR4:
 
 PARSEADDR5:
 	cpx #$03
-	bne PARSEADDR6
-
+	beq PA3
+	cpx #$08
+	beq PA3
+	jmp PARSEADDR6
+PA3:
 	tya
 	asl
 	asl
@@ -246,8 +284,11 @@ PARSEADDR5:
 
 PARSEADDR6:
 	cpx #$04
-	bne PARSEADDRERR	; greater than 4? error
-
+	beq PA4
+	cpx #$09
+	beq PA4
+	jmp PARSEADDRERR	; greater than 4? error
+PA4:
 	tya
 	clc					; clear carry flag
 	adc ARG2			; add lo byte to hi byte
@@ -279,7 +320,7 @@ CMDDUMP:
 	inx				; next position
 	stx ARG0		; store start position in buffer
 	jsr PARSEADDR	; parse address
-	cmp RERR		; look at error code
+	lda RERR		; look at error code
 	bne PARSEERR	; error parsing address
 
 	ldx ARG3		; get new position from ARG3
@@ -304,112 +345,57 @@ CMDDUMP:
 	lda CMDBUF,X	; get char
 	cmp #COLON		; is it a colon
 	bne	PRSPRNTRDY	; no? print
+	inc ARG3		; yes? set flag to print 16 bytes
 
-	inc ARG3		; set flag to print 16 bytes
+	; check next character
+	; and see if it is zero
+	; if not, another address is starting
+	; for a range
+	stz ARG4		; zero out these two arguments
+	stz ARG5
+	inx
+	lda CMDBUF,X	; check next char for zero
+	beq PRSPRNTRDY	; yes? go to print ready
+					; no? parse another address
+	lda ARG0		; push 0, 1, 2 and 3
+	pha
+	lda ARG1
+	pha
+	lda ARG2
+	pha
+	lda ARG3
+	pha
 
-	jmp PRSPRNTRDY
+	stx ARG0			; store start position in buffer
+	jsr PARSEADDR		; parse address
+	lda RERR			; look at error code
+	bne PARSEERRPULL	; error parsing address
 
-;CMDDUMP9999:
-;	inx				; increase char pos
-;	ldy #$00		; first digit
-;	lda CMDBUF,X	; load next char in buffer
-;	sta ARG0		; store in ARG0
+	lda ARG1
+	sta ARG4		; xfer hi byte
+	lda ARG2
+	sta ARG5		; xfer lo byte
 
-;PRSNEXTCHAR:
-;	lda TXTDGTS,Y	; get the digit char at index y
-;	cmp ARG0		; compare digit char to current char
-;	bne CMDDUMP2	; not equal, next one
-					; y contains the position of the char 0-f
-					; if this is high nibble, left shift 4 times
-
-;	cpx #$01		; are we on digit 1?
-;	bne ACASE2		; if not digit one, move on
-					; digit 1 is high byte
-;	tya				; transfer y to a (y is 0-f)
-;	asl
-;	asl
-;	asl
-;	asl				; left shift a four times to make it hi nibble
-;	sta ADDR8HZ		; store in addr high
-;	inx				; next buffer char
-;	lda CMDBUF,X	; get char
-;	sta ARG0		; store the current char
-;	ldy #$00		; first digit
-;	jmp PRSNEXTCHAR
-
-;CMDDUMP2:
-;	iny				; increment digit y
-;	cpy #$10		; compare to 0x10 (digits 0x00 through 0x0f)
-;	beq PARSEERR	; if past 0x0f, abort parse
-;	jmp PRSNEXTCHAR	; go back and compare again
-
-;ACASE2:
-;	cpx #$02
-;	bne ACASE3
-
-;	tya
-;	clc				; clear carry flag
-;	adc ADDR8HZ		; add low nibble to ADDRHI
-;	sta ADDR8HZ		; store back in ADDRHI
-;	inx				; next buffer char
-;	lda CMDBUF,X	; get char
-;	sta ARG0		; store the current char
-;	ldy #$00		; first digit
-;	jmp PRSNEXTCHAR
-
-;ACASE3:
-;	cpx #$03
-;	bne ACASE4
-
-;	tya
-;	asl
-;	asl
-;	asl
-;	asl
-;	sta ADDR8LZ
-;	inx
-;	lda CMDBUF,X	; get char
-;	sta ARG0		; store the current char
-;	ldy #$00
-;	jmp PRSNEXTCHAR
-
-;ACASE4:
-;	cpx #$04
-;	bne PARSEERR	; greater than 4? error
-;
-;	tya
-;	clc				; clear carry flag
-;	adc ADDR8LZ		; add lo byte to hi byte
-;	sta ADDR8LZ		; store in ADDR8LZ, used by lda below
-;	sta ARG1		; also store in ARG1 so we can print the address
-					; used by SOBYTEADDR
-
-;	lda ADDR8HZ		; used by lda below
-;	sta ARG0		; also store in ARG0 so we can print the address
-					; used by SOBYTEADDR
-
-	; get the value at that address and
-	; store in ARG2? so we can output
-
-;	ldy #$00		; address is in ADDRHI ADDRLO
-;	lda (ADDR8LZ),Y	; load value from address at 0080 (ADDR8HZ/ADDR8LZ)
-					; with no offset
-;	sta ARG2		; byte to print
-
-;	stz ARG3		; zero out 16 byte flag 
-;	inx				; look at the next buffer char
-					; should be char 5 if we got this far
-;	lda CMDBUF,X	; get char
-;	cmp #COLON		; is it a colon
-;	bne	PRSPRNTRDY	; no? print
-
-;	inc ARG3		; set flag to print 16 bytes
+	pla
+	sta ARG3
+	pla 
+	sta ARG2
+	pla
+	sta ARG1
+	pla
+	sta ARG0
 
 PRSPRNTRDY:
 	; addr8l and addr8h are already populated
 	; so just call SOBYTEADDR to output
 	jsr SOBYTEADDR	; print byte with addr
 	jmp PARSEDONE	; parse done
+
+PARSEERRPULL:
+	pla
+	pla
+	pla
+	pla
 
 PARSEERR:
 	inc RERR
@@ -462,6 +448,8 @@ ADDOBCHAR1:
 ; * ARG1 - address lo byte
 ; * ARG2 - byte at address
 ; * ARG3 - show 16 bytes?
+; * ARG4 - range high byte
+; * ARG5 - range lo byte
 ; ****************************************
 SOBYTEADDR:
 	lda ARG0
