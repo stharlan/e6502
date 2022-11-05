@@ -6,11 +6,16 @@ The computer can commuinicate with a PC via the 6522 and an Arduino Mega through
 
 The heart of it is the 6502 assembly "monitor" or "operating system" (whatever you want to call it). It supports some basic commands sent via serial.
 
-d####    - dumps a single byte of memory
+d####
 
-d####:   - dumps 16 bytes of memory (address truncated to 16 byte boundary)
+(d followed by 16 bit memory address) dumps a single byte of memory
 
-d####::  - dumps 256 bytes of memory (address truncated to 16 byte boundary)
+d####:
+
+(d followed by 16 bit memory address followed by single colon) dumps 16 bytes of memory (address truncated to 16 byte boundary)
+
+d####::
+(d followed by 16 bit memory address followed by 2 colons) dumps 256 bytes of memory (address truncated to 16 byte boundary)
 
 There's a ROM loader that uses an Arduino UNO R3, based off of Ben Eater's ROM loader. The Arduino code is a bit different than Ben's. It works in conjunction with a dotnet rom loader program (not included here) that I may convert to Python.
 
