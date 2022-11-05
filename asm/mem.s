@@ -79,6 +79,7 @@ SPACE			= ' '
 XCAP			= 'X'
 PR16B			= %00000001
 PR256B			= %00000010
+PRRNGA			= %00000100
 
 	; Memory map:
 	; $0000 - $7fff = RAM
@@ -122,9 +123,9 @@ RESET:
 	stz RERR		; clear error
 
 	; debug
-	;lda #'d'
+	;lda #'s'
 	;sta $1100
-	;lda #'0'
+	;lda #'1'
 	;sta $1101
 	;lda #'0'
 	;sta $1102
@@ -140,11 +141,11 @@ RESET:
 	;sta $1107
 	;lda #'0'
 	;sta $1108
-	;lda #'0'
+	;lda #'6'
 	;sta $1109
 	;lda #$00
-	;sta $1107
-	;lda #$07
+	;sta $110a
+	;lda #$0a
 	;sta CBUFN
 	;lda #%00000011
 	;sta CBUFF
@@ -313,6 +314,8 @@ PARSEADDREND:
 ; ****************************************
 PARSECMD:
 	stz RERR		; clear error
+	stz ARG4		; zero out these two arguments
+	stz ARG5
 	ldx #$00		; start at cmdbuf zero
 	lda CMDBUF,X	; load first character
 	sta CBUFCMD		; store the command character
@@ -347,24 +350,10 @@ PARSECMD:
 	bne	PRSPRNTRDY	; no? print
 	inc ARG3		; yes? set flag to print 16 bytes (#01)
 
-					; if we are print 16 bytes
-					; start at a $###0 boundary
-					; by discarding the lo nibble of the low byte
-
-	lda ARG1		; discard the lo nibble of the lo byte
-	and #%11110000
-	sta ARG1
-	sta ADDR8LZ
-	ldy #$00		; address is in ADDRHI ADDRLO
-	lda (ADDR8LZ),Y	; get the byte value again
-	sta ARG2		; and store in ARG2
-
 	; check next character
 	; and see if it is zero
 	; if not, another address is starting
 	; for a range
-	stz ARG4			; zero out these two arguments
-	stz ARG5
 	inx
 	lda CMDBUF,X		; load the next character into A
 	beq PRSPRNTRDY		; is the next character zero?
@@ -395,14 +384,6 @@ PRS256B:
 	inc ARG3			; print 256 bytes (#02)
 	jmp PRSPRNTRDY		; print ready
 
-PARSEERR:
-	inc RERR
-
-PARSEDONE:
-	stz CBUFN		; reset cmd buffer
-	stz CMDBUF		; first char is zero
-	rts
-
 PARSEERRPULL:
 	pla				; error - pull four values
 	pla				; back off the stack
@@ -410,27 +391,13 @@ PARSEERRPULL:
 	pla				; so the stack doesn't get corrupted
 	jmp PARSEERR
 
-PRSPUSHARGS:
-	lda ARG0		; push 0, 1, 2 and 3
-	pha
-	lda ARG1
-	pha
-	lda ARG2
-	pha
-	lda ARG3
-	pha
-	jmp PRSBACK1
+PARSEERR:
+	inc RERR
 
-PRSPULLARGS:
-	pla
-	sta ARG3
-	pla 
-	sta ARG2
-	pla
-	sta ARG1
-	pla
-	sta ARG0
-	jmp PRSPRNTRDY
+PARSEDONE:
+	stz CBUFN		; reset cmd buffer
+	stz CMDBUF		; first char is zero
+	rts
 
 PRSPRNTRDY:
 	; addr8l and addr8h are already populated
@@ -440,8 +407,8 @@ PRSPRNTRDY:
 	cmp #'d'			; dump (or print)
 	bne BUFCMDX			; try 'x'
 	lda ARG3
-	cmp #PR256B			; check if we're printing 256 bytes
-	beq PRSPRNT256RDY	; yes? jump
+	bit #PR256B
+	bne PRSPRNT256RDY	; yes? jump
 	jsr SOBYTEADDR		; no? print data
 	jmp PARSEDONE		; done
 
@@ -456,10 +423,27 @@ BUFCMDS:
 	; store (byte) in memory
 	cmp #'s'
 	bne PARSEDONE		; unknown command, done
-	; not impemented yet
+	lda ARG3			; check the range flag
+	bit #PRRNGA			; bit set
+	beq PARSEERR		; no? 
+	lda ARG5			; yes? ARG5 is the byte to store
+						; it's the lo byte in the second part of the command
+						; which is a 16-bit value
+						; but, only use the low byte
+	ldy #$00
+	sta (ADDR8LZ),Y		; store the byte
 	jmp PARSEDONE
 
 PRSPRNT256RDY:
+						; if we are print 16 bytes
+						; start at a $###0 boundary
+						; by discarding the lo nibble of the low byte
+
+	lda ARG1			; discard the lo nibble of the lo byte
+	and #%11110000
+	sta ARG1
+	sta ADDR8LZ
+
 	ldx #$00			; line counter; start at line 0
 
 PRSPRNT256RDYB:
@@ -498,6 +482,30 @@ PRSPRNT256RDYB:
 	lda ARG0			; in zero page
 	sta ADDR8HZ			; so we can get the byte
 	jmp PRSPRNT256RDYB	; loop again
+
+PRSPUSHARGS:
+	lda ARG0		; push 0, 1, 2 and 3
+	pha
+	lda ARG1
+	pha
+	lda ARG2
+	pha
+	lda ARG3
+	pha
+	jmp PRSBACK1
+
+PRSPULLARGS:
+	pla
+	ora #PRRNGA			; set the range flag
+	sta ARG3
+	pla 
+	sta ARG2
+	pla
+	sta ARG1
+	pla
+	sta ARG0
+
+	jmp PRSPRNTRDY
 
 ; ****************************************
 ; * reset output buffer
