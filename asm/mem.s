@@ -11,7 +11,7 @@
 ; * back.
 ; ****************************************
 
-; variables
+; constants
 VIAPORTB		= $8000
 VIAPORTA		= $8001
 VIADDRB			= $8002
@@ -76,6 +76,8 @@ DOLLAR			= '$'
 COLON			= ':'
 SPACE			= ' '
 XCAP			= 'X'
+PR16B			= %00000001
+PR256B			= %00000010
 
 	; Memory map:
 	; $0000 - $7fff = RAM
@@ -108,8 +110,8 @@ TXTSNTEA	.word TXTSNTE
 ; ****************************************
 RESET:
 
-	lda #$55
-	sta $0900
+	lda #$55		; this is just for debug
+	sta $0900		; so I can test that RAM is working
 
 	stz CBUFN		; num of chars in cmd buffer
 	stz CMDBUF		; first char is zero
@@ -345,26 +347,39 @@ CMDDUMP:
 	lda CMDBUF,X	; get char
 	cmp #COLON		; is it a colon
 	bne	PRSPRNTRDY	; no? print
-	inc ARG3		; yes? set flag to print 16 bytes
+	inc ARG3		; yes? set flag to print 16 bytes (#01)
+
+					; if we are print 16 bytes
+					; start at a $###0 boundary
+					; by discarding the lo nibble of the low byte
+
+	lda ARG1		; discard the lo nibble of the lo byte
+	and #%11110000
+	sta ARG1
+	sta ADDR8LZ
+	ldy #$00		; address is in ADDRHI ADDRLO
+	lda (ADDR8LZ),Y	; get the byte value again
+	sta ARG2		; and store in ARG2
 
 	; check next character
 	; and see if it is zero
 	; if not, another address is starting
 	; for a range
-	stz ARG4		; zero out these two arguments
+	stz ARG4			; zero out these two arguments
 	stz ARG5
 	inx
-	lda CMDBUF,X	; check next char for zero
-	beq PRSPRNTRDY	; yes? go to print ready
-					; no? parse another address
-	lda ARG0		; push 0, 1, 2 and 3
-	pha
-	lda ARG1
-	pha
-	lda ARG2
-	pha
-	lda ARG3
-	pha
+	lda CMDBUF,X		; load the next character into A
+	beq PRSPRNTRDY		; is the next character zero?
+						; yes? done - go to print ready
+
+	cmp #COLON			; no? is it another colon?
+	beq PRS256B			; yes? user wants 256 bytes to print
+
+	jmp PRSPUSHARGS		; no? maybe it's another address
+						; push args to stack
+						; so we can call PARSEADDR
+
+PRSBACK1:
 
 	stx ARG0			; store start position in buffer
 	jsr PARSEADDR		; parse address
@@ -372,30 +387,15 @@ CMDDUMP:
 	bne PARSEERRPULL	; error parsing address
 
 	lda ARG1
-	sta ARG4		; xfer hi byte
+	sta ARG4			; xfer hi byte
 	lda ARG2
-	sta ARG5		; xfer lo byte
+	sta ARG5			; xfer lo byte
 
-	pla
-	sta ARG3
-	pla 
-	sta ARG2
-	pla
-	sta ARG1
-	pla
-	sta ARG0
+	jmp PRSPULLARGS		; pull args back from stack
 
-PRSPRNTRDY:
-	; addr8l and addr8h are already populated
-	; so just call SOBYTEADDR to output
-	jsr SOBYTEADDR	; print byte with addr
-	jmp PARSEDONE	; parse done
-
-PARSEERRPULL:
-	pla
-	pla
-	pla
-	pla
+PRS256B:
+	inc ARG3			; print 256 bytes (#02)
+	jmp PRSPRNTRDY		; print ready
 
 PARSEERR:
 	inc RERR
@@ -404,6 +404,84 @@ PARSEDONE:
 	stz CBUFN		; reset cmd buffer
 	stz CMDBUF		; first char is zero
 	rts
+
+PARSEERRPULL:
+	pla				; error - pull four values
+	pla				; back off the stack
+	pla				; before returning the error
+	pla				; so the stack doesn't get corrupted
+	jmp PARSEERR
+
+PRSPUSHARGS:
+	lda ARG0		; push 0, 1, 2 and 3
+	pha
+	lda ARG1
+	pha
+	lda ARG2
+	pha
+	lda ARG3
+	pha
+	jmp PRSBACK1
+
+PRSPULLARGS:
+	pla
+	sta ARG3
+	pla 
+	sta ARG2
+	pla
+	sta ARG1
+	pla
+	sta ARG0
+	jmp PRSPRNTRDY
+
+PRSPRNTRDY:
+	; addr8l and addr8h are already populated
+	; so just call SOBYTEADDR to output
+	lda ARG3
+	cmp #PR256B			; check if we're printing 256 bytes
+	beq PRSPRNT256RDY	; yes? jump
+	jsr SOBYTEADDR		; no? print data
+	jmp PARSEDONE		; done
+
+PRSPRNT256RDY:
+	ldx #$00			; line counter; start at line 0
+
+PRSPRNT256RDYB:
+	ldy #$00			; first byte at address
+	lda (ADDR8LZ),Y		; get the byte value at the current address (offset 0)
+	sta ARG2			; and store in ARG2
+
+	lda ARG0			; preserve ARG0 and ARG1
+	pha
+	lda ARG1
+	pha
+	txa					; preserve x (line number)
+	pha
+
+	jsr SOBYTEADDR		; print line
+
+	pla					; restore x
+	tax
+	pla					; restore ARG0 and ARG1
+	sta ARG1
+	pla 
+	sta ARG0
+
+	inx					; next line
+	cpx #$10			; see if we've done 16 lines
+	beq PARSEDONE		; yes? done
+	lda ARG1			; get lo byte
+	clc					; clear carry flag
+	adc #$10			; increment it by 16 bytes
+	sta ARG1			; store back in ARG1
+	lda ARG0			; get hi byte
+	adc #$00			; add nothing but carry bit
+	sta ARG0			; store back in arg0
+	lda ARG1			; transfer ARG0 and ARG1
+	sta ADDR8LZ			; to ADDR8LZ and ADDR8HZ
+	lda ARG0			; in zero page
+	sta ADDR8HZ			; so we can get the byte
+	jmp PRSPRNT256RDYB	; loop again
 
 ; ****************************************
 ; * reset output buffer
