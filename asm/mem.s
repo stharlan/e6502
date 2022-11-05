@@ -41,7 +41,8 @@ CBUFN			= $1000 ; num chars in cmdbuf
 CBUFF			= $1001	; cmd buffer flags
 						; bit 0: 1 = unexecuted data in buffer
 						; bit 1: 1 = ready to execute
-OUTBUFP			= $1002 ; output buffer position
+CBUFCMD			= $1002	; command character
+OUTBUFP			= $1003 ; output buffer position
 
 ARG0			= $1010
 ARG1			= $1011
@@ -313,12 +314,9 @@ PARSEADDREND:
 PARSECMD:
 	stz RERR		; clear error
 	ldx #$00		; start at cmdbuf zero
-	lda CMDBUF,X	; load character
-	cmp #$64		; d = dump memory
-	beq CMDDUMP
-	jmp PARSEERR
+	lda CMDBUF,X	; load first character
+	sta CBUFCMD		; store the command character
 
-CMDDUMP:
 	inx				; next position
 	stx ARG0		; store start position in buffer
 	jsr PARSEADDR	; parse address
@@ -437,11 +435,29 @@ PRSPULLARGS:
 PRSPRNTRDY:
 	; addr8l and addr8h are already populated
 	; so just call SOBYTEADDR to output
+	; check the command
+	lda CBUFCMD
+	cmp #'d'			; dump (or print)
+	bne BUFCMDX			; try 'x'
 	lda ARG3
 	cmp #PR256B			; check if we're printing 256 bytes
 	beq PRSPRNT256RDY	; yes? jump
 	jsr SOBYTEADDR		; no? print data
 	jmp PARSEDONE		; done
+
+BUFCMDX:
+	; execute at memory location
+	cmp #'x'
+	bne BUFCMDS			; try 's'
+	jmp (ADDR8LZ)		; hold my beer
+						; jump to the specified address
+
+BUFCMDS:
+	; store (byte) in memory
+	cmp #'s'
+	bne PARSEDONE		; unknown command, done
+	; not impemented yet
+	jmp PARSEDONE
 
 PRSPRNT256RDY:
 	ldx #$00			; line counter; start at line 0
