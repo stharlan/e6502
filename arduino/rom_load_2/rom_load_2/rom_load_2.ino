@@ -187,8 +187,8 @@ void setup() {
 void loop() {
   if(Serial.available() > 0)
   {
-    byte address_bytes[2];
-    Serial.readBytes(address_bytes, 2);
+    byte address_bytes[3];
+    Serial.readBytes(address_bytes, 3);
 
     // lo byte first $lohi
     int address = address_bytes[0] + (address_bytes[1] << 8);
@@ -197,10 +197,16 @@ void loop() {
     sprintf(buf, "ok %04x", address);
     Serial.println(buf);
 
-    Serial.readBytes(data_block, 64);
-
-    writeEEPROM(address);
-    
-    Serial.println("ok");    
+    if(address_bytes[2] == 0x00)
+    {
+      // write block
+      Serial.readBytes(data_block, 64);
+      writeEEPROM(address);      
+    } else if(address_bytes[2] == 0x01)
+    {
+      // read and print block of 256 bytes
+      printContents(address);
+    }
+    Serial.println("ok");
   }
 }
