@@ -102,10 +102,16 @@ TXTRDY:
 	db	'e6502 is ready...',$00
 TXTSNTE:
 	db 	'SYNTAX ERROR!',$00
+TXTOK:
+	db	'ok',$00
+TXTERR:
+	db	'err',$00
 TXTDGTS:
 	db '0123456789ABCDEF'
 TXTRDYA		.word TXTRDY
 TXTSNTEA	.word TXTSNTE
+TXTOKA		.word TXTOK
+TXTERRA		.word TXTERR
 
 ; ****************************************
 ; * main loop (RESET vector)
@@ -432,6 +438,7 @@ BUFCMDS:
 						; but, only use the low byte
 	ldy #$00
 	sta (ADDR8LZ),Y		; store the byte
+	jsr SENDOK			; send ok message serial
 	jmp PARSEDONE
 
 PRSPRNT256RDY:
@@ -797,6 +804,28 @@ WAITIFR:			; wait for data taken signal on INT CB1
 	rts
 
 ; ****************************************
+; * send ok message via serial
+; ****************************************
+SENDOK:
+	lda TXTOKA		; output ready msg on serial
+	sta ARG0		; lobyte 
+	lda TXTOKA+1	; the zero page
+	sta ARG1		; hibyte
+	jsr SEROUT		; to write it to serial	
+	rts
+
+; ****************************************
+; * send ok message via serial
+; ****************************************
+SENDERR:
+	lda TXTERRA		; output ready msg on serial
+	sta ARG0		; lobyte 
+	lda TXTERRA+1	; the zero page
+	sta ARG1		; hibyte
+	jsr SEROUT		; to write it to serial	
+	rts
+
+; ****************************************
 ; * irq handler
 ; ****************************************
 ON_NMI:
@@ -804,12 +833,13 @@ ON_IRQ:
 	pha				; push A to stack
 	phx				; push X to stack
 
-	lda VIAIFR		; check if CA1 INT has been hit
-	and #VIAIFRCA1	; if so, bit 1 will be set and result will be 1
-	beq IRQDONE		; if not set, and will be zero, go to done
+	lda #VIAIFRCA1	; load the IFR CA1 flag
+	bit VIAIFR		; see if it's set
+	beq IRQDONE		; no? done
 
-	lda VIAPORTA	; ARDUINO has a char ready to transmit
+	lda VIAPORTA	; yes? ARDUINO has a char ready to transmit
 					; load it from VIA into a
+
 	pha				; push it to the stack
 
 	cmp #CR
