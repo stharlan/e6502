@@ -1,5 +1,6 @@
 
 import serial
+import time
 
 file = open("..\\..\\asm\\mem32k.bin","rb")
 membytes = file.read(32768)
@@ -52,10 +53,15 @@ address = 0x0
 
 #writeblock(address)
 
+start = time.time()
+
 while address < 0x8000:
     if address % 0x1000 == 0:
         print(f'Writing address ${address:02x}')
     writeblock(address)
     address += 64
+
+end = time.time()
+print(f"elapsed {end - start} s")
 
 print("Complete")
