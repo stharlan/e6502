@@ -85,6 +85,7 @@ void loop()
 {
   if(Serial.available())
   {
+    //Serial.println("serial data available");
     int data = Serial.read();
     if((data == 0x0a) || (data > 0x1f && data <= 0x7f)) 
     {

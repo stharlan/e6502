@@ -43,6 +43,8 @@ CBUFF			= $1001	; cmd buffer flags
 						; bit 1: 1 = ready to execute
 CBUFCMD			= $1002	; command character
 OUTBUFP			= $1003 ; output buffer position
+IRQBHF			= $1004 ; irq behavior flags
+UPLDCNTR		= $1005 ; upload counter
 
 ARG0			= $1010
 ARG1			= $1011
@@ -80,6 +82,7 @@ XCAP			= 'X'
 PR16B			= %00000001
 PR256B			= %00000010
 PRRNGA			= %00000100
+IRQBHFU			= %00000001
 
 	; Memory map:
 	; $0000 - $7fff = RAM
@@ -102,16 +105,22 @@ TXTRDY:
 	db	'e6502 is ready...',$00
 TXTSNTE:
 	db 	'SYNTAX ERROR!',$00
+TXTWAITUP:
+	db	'waiting for upload...',$00
+TXTUPCOMPL:
+	db	'upload complete',$00
 TXTOK:
 	db	'ok',$00
 TXTERR:
 	db	'err',$00
 TXTDGTS:
 	db '0123456789ABCDEF'
-TXTRDYA		.word TXTRDY
-TXTSNTEA	.word TXTSNTE
-TXTOKA		.word TXTOK
-TXTERRA		.word TXTERR
+TXTRDYA			.word TXTRDY
+TXTSNTEA		.word TXTSNTE
+TXTOKA			.word TXTOK
+TXTERRA			.word TXTERR
+TXTWAITUPA		.word TXTWAITUP
+TXTUPCOMPLA		.word TXTUPCOMPL
 
 ; ****************************************
 ; * main loop (RESET vector)
@@ -127,6 +136,7 @@ RESET:
 	stz OUTBUF		; OUTput BUFfer
 	stz OUTBUFP		; OUTput BUFfer Position
 	stz RERR		; clear error
+	stz IRQBHF		; zero irq behavior flags
 
 	; debug
 	;lda #'s'
@@ -397,14 +407,6 @@ PARSEERRPULL:
 	pla				; so the stack doesn't get corrupted
 	jmp PARSEERR
 
-PARSEERR:
-	inc RERR
-
-PARSEDONE:
-	stz CBUFN		; reset cmd buffer
-	stz CMDBUF		; first char is zero
-	rts
-
 PRSPRNTRDY:
 	; addr8l and addr8h are already populated
 	; so just call SOBYTEADDR to output
@@ -418,6 +420,14 @@ PRSPRNTRDY:
 	jsr SOBYTEADDR		; no? print data
 	jmp PARSEDONE		; done
 
+PARSEERR:
+	inc RERR
+
+PARSEDONE:
+	stz CBUFN		; reset cmd buffer
+	stz CMDBUF		; first char is zero
+	rts
+
 BUFCMDX:
 	; execute at memory location
 	cmp #'x'
@@ -428,7 +438,7 @@ BUFCMDX:
 BUFCMDS:
 	; store (byte) in memory
 	cmp #'s'
-	bne PARSEDONE		; unknown command, done
+	bne BUFCMDU		; unknown command, done
 	lda ARG3			; check the range flag
 	bit #PRRNGA			; bit set
 	beq PARSEERR		; no? 
@@ -440,6 +450,22 @@ BUFCMDS:
 	sta (ADDR8LZ),Y		; store the byte
 	jsr SENDOK			; send ok message serial
 	jmp PARSEDONE
+
+BUFCMDU:
+	cmp #'u'			; upload?
+	bne PARSEERR		; no? unknown command, done
+
+	jsr SENDWAITUP		; send message waiting for upload
+	stz UPLDCNTR		; yes? zero the upload counter
+	lda #IRQBHFU		; load upload mask
+	sta IRQBHF			; set irq beh flags to upload
+
+BUFCMDULOOP:
+						; loop until irq beh flag upload is cleared
+	lda IRQBHF			; load flags
+	and #IRQBHFU		; and with mask
+	beq PARSEDONE		; branch if not set (result == 0)
+	jmp BUFCMDULOOP		; still set? loop again
 
 PRSPRNT256RDY:
 						; if we are print 16 bytes
@@ -826,12 +852,35 @@ SENDERR:
 	rts
 
 ; ****************************************
+; * send message waiting for upload
+; ****************************************
+SENDWAITUP:
+	lda TXTWAITUPA		; output ready msg on serial
+	sta ARG0			; lobyte 
+	lda TXTWAITUPA+1	; the zero page
+	sta ARG1			; hibyte
+	jsr SEROUT			; to write it to serial	
+	rts
+
+; ****************************************
+; * send message upload complete
+; ****************************************
+SENDUPLOADCOMPLETE:
+	lda TXTUPCOMPLA		; output ready msg on serial
+	sta ARG0			; lobyte 
+	lda TXTUPCOMPLA+1	; the zero page
+	sta ARG1			; hibyte
+	jsr SEROUT			; to write it to serial	
+	rts
+
+; ****************************************
 ; * irq handler
 ; ****************************************
 ON_NMI:
 ON_IRQ:
 	pha				; push A to stack
 	phx				; push X to stack
+	phy
 
 	lda #VIAIFRCA1	; load the IFR CA1 flag
 	bit VIAIFR		; see if it's set
@@ -842,12 +891,19 @@ ON_IRQ:
 
 	pha				; push it to the stack
 
-	cmp #CR
+	; check irq behavior flags
+	lda IRQBHF		; load flags
+	and #IRQBHFU	; and with mask
+	bne IRQUPLOAD	; yes? (branch if result > 0)
+
+	pla				; pull a off stack
+	cmp #CR			; no? compare char to carriage return
 	beq SETEXQ		; set xeq on carriage return
 
 	cmp #LF			; compare to 0x0a
 	beq SETEXQ		; if so, go to set the execute flag
 
+	pha				; push a back to stack
 	lda CBUFN		; check chars in cmd buffer
 	cmp #$ff
 	beq CBUFFULL	; if 255 chars
@@ -870,8 +926,6 @@ ON_IRQ:
 	jmp IRQDONE
 
 SETEXQ:
-	pla				; get the loaded char off the stack
-					; and discard
 	lda CBUFN		; check chars in cmd buffer
 	beq IRQDONE		; if no chars, done
 
@@ -885,9 +939,25 @@ CBUFFULL:
 	pla
 
 IRQDONE:
+	ply
 	plx				; retrieve X from stack
 	pla				; retrieve A from stack
 	rti
+
+IRQUPLOAD:
+	pla						; get byte from stack
+	ldy UPLDCNTR			; load upload counter into y
+	sta (ADDR8LZ),Y			; store the byte in memory
+	cpy #$ff				; check if y is 0xFF
+	beq IRQUPLOAD_DONE		; done
+
+	inc UPLDCNTR			; increment upload counter
+	jsr SENDUPLOADCOMPLETE
+	jmp IRQDONE
+
+IRQUPLOAD_DONE:
+	stz IRQBHF			; reset ireq behavior flags
+	jmp IRQDONE			; done
 
 	; NMI, reset and IRQ vectors
 

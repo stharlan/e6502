@@ -53,9 +53,10 @@ address = 0x0
 #writeblock(address)
 
 while address < 0x8000:
-    if address % 0x1000 == 0:
-        print(f'Writing address ${address:02x}')
+    if address % 0x100 == 0:
+        print(f'Writing address ${address:02x}', end='\r')
     writeblock(address)
     address += 64
 
+print("")
 print("Complete")
