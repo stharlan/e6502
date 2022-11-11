@@ -1,0 +1,1 @@
+C:\Users\stuar\Documents\vasm6502_oldstyle_Win64\vasm6502_oldstyle.exe -Fbin -dotdir -c02 -o prog1.bin prog1.s
