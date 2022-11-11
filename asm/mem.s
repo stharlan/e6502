@@ -1,5 +1,5 @@
 
-; ****************************************
+; ************************************************************
 ; * 6502 ROM Image
 ; * by Stuart Harlan 2022
 ; *
@@ -9,14 +9,18 @@
 ; * Arduino MEGA. Commands can be send to
 ; * the 6502 and responses will be sent
 ; * back.
-; ****************************************
+; ************************************************************
 ; Commands (all numbers in hex, 4 digits):
 ;   d####       - dump one byte of memory
 ;   d####:      - dump 16 bytes of memory
 ;   d####::     - dump 256 bytes of memory
-;   s####:####  - store byte (lo byte of number after colon)
-;               - into address (number before colon)
+;   sXXXX:YYYY  - store byte (lo byte of YYYY)
+;                 into address XXXX
 ;   x####       - execute code at address
+; Future
+;   cXXXX:YYYY  - compute checksum of YYYY bytes at address
+;                 XXXX
+; ************************************************************
 
 ; constants
 VIAPORTB        = $8000
@@ -69,6 +73,21 @@ ARGC            = $101C
 ARGD            = $101D
 ARGE            = $101E
 RERR            = $101F
+
+ARG0L           = $1010
+ARG0H           = $1011
+ARG2L           = $1012
+ARG2H           = $1013
+ARG4L           = $1014
+ARG4H           = $1015
+ARG6L           = $1016
+ARG6H           = $1017
+ARG8L           = $1018
+ARG8H           = $1019
+ARGAL           = $101A
+ARGAH           = $101B
+ARGCL           = $101C
+ARGCH           = $101D
 
 CMDBUF          = $1100     ; command buffer, 256 bytes $1100 to $11ff
 OUTBUF          = $1200     ; output buffer, 256 bytes $1200 to $12ff
@@ -320,7 +339,7 @@ PARSECMD:
     stx ARG0        ; store start position in buffer
     jsr PARSEADDR   ; parse address
     lda RERR        ; look at error code
-    bne PARSEERR    ; error parsing address
+    bne PARSEERR1   ; error parsing address
 
     ldx ARG3        ; get new position from ARG3
 
@@ -387,6 +406,11 @@ PARSEERRPULL:
     pla                 ; so the stack doesn't get corrupted
     jmp PARSEERR
 
+PARSEERR1:
+    jmp PARSEERR
+PARSEDONE1:
+    jmp PARSEDONE
+
 PRSPRNTRDY:
     ; addr8l and addr8h are already populated
     ; so just call SOBYTEADDR to output
@@ -396,17 +420,12 @@ PRSPRNTRDY:
     bne BUFCMDX         ; try 'x'
     lda ARG3
     bit #PR256B
-    bne PRSPRNT256RDY   ; yes? jump
+    bne PRSPRNT256RDY1  ; yes? jump
     jsr SOBYTEADDR      ; no? print data
     jmp PARSEDONE       ; done
 
-PARSEERR:
-    inc RERR
-
-PARSEDONE:
-    stz CBUFN           ; reset cmd buffer
-    stz CMDBUF          ; first char is zero
-    rts
+PRSPRNT256RDY1:
+    jmp PRSPRNT256RDY
 
 BUFCMDX:
     ; execute at memory location
@@ -421,7 +440,7 @@ BUFCMDS:
     bne BUFCMDU         ; unknown command, done
     lda ARG3            ; check the range flag
     bit #PRRNGA         ; bit set
-    beq PARSEERR        ; no? 
+    beq PARSEERR1       ; no? 
     lda ARG5            ; yes? ARG5 is the byte to store
                         ; it's the lo byte in the second part of the command
                         ; which is a 16-bit value
@@ -433,19 +452,91 @@ BUFCMDS:
 
 BUFCMDU:
     cmp #'u'            ; upload?
-    bne PARSEERR        ; no? unknown command, done
+    bne BUFCMDC         ; no? unknown command, done
 
     jsr SENDWAITUP      ; send message waiting for upload
     stz UPLDCNTR        ; yes? zero the upload counter
     lda #IRQBHFU        ; load upload mask
-    sta IRQBHF          ; set irq beh flags to upload
+    sta IRQBHF          ; set irq beh flags to upload    
 
 BUFCMDULOOP:
                         ; loop until irq beh flag upload is cleared
     lda IRQBHF          ; load flags
     and #IRQBHFU        ; and with mask
-    beq PARSEDONE       ; branch if not set (result == 0)
+    beq PARSEDONE1      ; branch if not set (result == 0)
     jmp BUFCMDULOOP     ; still set? loop again
+
+BUFCMDC:                        
+    cmp #'c'            ; checksum
+    bne PARSEERR        ; unknown command, done
+    lda ARG3            ; check the range flag
+    bit #PRRNGA         ; bit set
+    beq PARSEERR        ; no? 
+
+    clc                 ; clear the carry flag
+    lda ARG1
+    adc ARG5            ; add lo bytes
+    sta ARG8L           ; store in arg8
+    lda ARG0
+    adc ARG4            ; add hi bytes with carry
+    sta ARG8H           ; store in arg9
+
+    stz ARG7            ; the checksum
+    clc                 ; clear carry flag
+    php
+
+BUFCMDCLOOP:
+    ldy #$00            ; offset always zero
+    lda (ADDR8LZ),Y     ; load byte at address
+    plp
+    adc ARG7            ; add to ARG7
+    sta ARG7            ; store back in ARG7
+    php                 ; push processor flags to save carry flag
+
+    clc
+    lda #$01
+    adc ADDR8LZ         ; increment lo byte of address
+    sta ADDR8LZ
+    lda #$00
+    adc ADDR8HZ         ; add carry to hi byte of address
+    sta ADDR8HZ
+    cmp ARG8H
+    beq BUFCMDCHIEQ     ; hi bytes are equal
+    jmp BUFCMDCLOOP
+
+BUFCMDCHIEQ:
+    lda ADDR8LZ
+    cmp ARG8L
+    beq BUFCMDCDONE
+    jmp BUFCMDCLOOP
+    
+BUFCMDCDONE:
+    lda #$00
+    plp
+    adc ARG7            ; do the final add to pick up the carry if set
+    sta ARG7            ; store back in ARG7
+    lda #'$'
+    sta ARG0
+    jsr SEROUTCHAR      ; output $
+    lda ARG7
+    sta ARG0
+    jsr BYTE2CHAR       ; convert byte at ARG7 to chars
+    lda ARG1
+    sta ARG0
+    jsr SEROUTCHAR      ; out high nibble char
+    lda ARG2
+    sta ARG0
+    jsr SEROUTCHAR      ; out lo nibble char
+    jsr SEROUTCRLF      ; output CRLF
+    jsr SENDOK
+    jmp PARSEDONE
+
+PARSEERR:
+    inc RERR
+PARSEDONE:
+    stz CBUFN           ; reset cmd buffer
+    stz CMDBUF          ; first char is zero
+    rts
 
 PRSPRNT256RDY:
                         ; if we are print 16 bytes
@@ -708,35 +799,35 @@ BYTE2CHAR:
 ; * serial out byte
 ; * ARG0 - byte (formerly SOVAL)
 ; ****************************************
-SOBYTE:
-    lda ARG0
-    pha             ; push ARG0 to stack
+;SOBYTE:
+;    lda ARG0
+;    pha             ; push ARG0 to stack
 
-    lda #DOLLAR     ; output a dollar sign
-    sta ARG0
-    jsr SEROUTCHAR
+;    lda #DOLLAR     ; output a dollar sign
+;    sta ARG0
+;    jsr SEROUTCHAR
 
-    pla
-    sta ARG0
-    jsr BYTE2CHAR
+;    pla
+;    sta ARG0
+;    jsr BYTE2CHAR
 
     ; output the high nibble
-    lda ARG1
-    sta ARG0
-    jsr SEROUTCHAR  ; output next char
+;    lda ARG1
+;    sta ARG0
+;    jsr SEROUTCHAR  ; output next char
 
     ; output the lo nibble
-    lda ARG2
-    sta ARG0
-    jsr SEROUTCHAR  ; output the char
+;    lda ARG2
+;    sta ARG0
+;    jsr SEROUTCHAR  ; output the char
 
-    lda #LF
-    sta ARG0
-    jsr SEROUTCHAR  ; output a linefeed
+;    lda #LF
+;    sta ARG0
+;    jsr SEROUTCHAR  ; output a linefeed
 
-    pla
-    sta ARG0
-    rts
+;    pla
+;    sta ARG0
+;    rts
 
 ; ****************************************
 ; * serial out CMDBUF
@@ -782,13 +873,19 @@ SEROUT1:
     iny             ; next char
     jmp SEROUT1     ; loop again
 SEROUT2:
+    jsr SEROUTCRLF
+    rts
+
+; ****************************************
+; * serial out CRLF
+; ****************************************
+SEROUTCRLF:
     lda #CR
     sta ARG0
     jsr SEROUTCHAR
     lda #LF
     sta ARG0
     jsr SEROUTCHAR
-
     rts
 
 ; ****************************************
