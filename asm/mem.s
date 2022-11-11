@@ -952,12 +952,12 @@ IRQUPLOAD:
 	beq IRQUPLOAD_DONE		; done
 
 	inc UPLDCNTR			; increment upload counter
-	jsr SENDUPLOADCOMPLETE
 	jmp IRQDONE
 
 IRQUPLOAD_DONE:
-	stz IRQBHF			; reset ireq behavior flags
-	jmp IRQDONE			; done
+	stz IRQBHF				; reset ireq behavior flags
+	jsr SENDUPLOADCOMPLETE
+	jmp IRQDONE				; done
 
 	; NMI, reset and IRQ vectors
 

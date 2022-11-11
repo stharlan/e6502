@@ -87,8 +87,8 @@ void loop()
   {
     //Serial.println("serial data available");
     int data = Serial.read();
-    if((data == 0x0a) || (data > 0x1f && data <= 0x7f)) 
-    {
+    //if((data == 0x0a) || (data > 0x1f && data <= 0x7f)) 
+    //{
       //Serial.println("Setting pins A");
       //Serial.print("Sending ");
       //Serial.print((char)data);
@@ -107,6 +107,6 @@ void loop()
 
       // wait for IRQB to go high
       while(!digitalRead(IRQB)) {}
-    }
+    //}
   }
 }
