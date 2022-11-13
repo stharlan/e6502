@@ -43,8 +43,11 @@ VIAPORTA_NOH    = $800f
 ZP1L            = $0000
 ZP1H            = $0001
 
-ARG0            = $1000
-ARG1            = $1001
+    ; control blocks
+
+BLKSEROUTBYTE   = $1000     ; [0] = char to output
+BLKSERINBYTE    = $1001     ; [0] = (return) 0 if no data; > 0 otherwise
+                            ; [1] = (return) the byte read
 
     ; Memory map:
     ; $0000 - $7fff = RAM
@@ -85,7 +88,7 @@ RESET:
                         ; READY
 
 RESET2:
-    lda TXTREADYA
+    lda TXTREADYA       ; BEGIN output a ready message
     sta ZP1L
     lda TXTREADYA+1
     sta ZP1H
@@ -94,61 +97,33 @@ RESET2:
 RESET3:
     lda (ZP1L),Y
     beq MAIN_LOOP
-    sta ARG0
+    sta BLKSEROUTBYTE
     jsr SEROUTBYTE
     iny
-    jmp RESET3
-
-    ;lda #'R'
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #'E'
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #'A'
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #'D'
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #'Y'
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #$0d
-    ;sta ARG0
-    ;jsr SEROUTBYTE
-
-    ;lda #$0a
-    ;sta ARG0
-    ;jsr SEROUTBYTE
+    jmp RESET3          ; END output a ready message
 
 MAIN_LOOP:
 
     jsr SERINBYTE       ; get a character
-    lda ARG0            ; load result flag
-    beq MAIN_LOOP   ; none available
+    lda BLKSERINBYTE    ; load result flag
+    beq MAIN_LOOP       ; none available
 
-    lda ARG1            ; get char
-    sta ARG0            ; store in arg0
+    lda BLKSERINBYTE+1  ; get char
+    sta BLKSEROUTBYTE   ; store in arg0
     jsr SEROUTBYTE      ; echo back
 
     jmp MAIN_LOOP
 
 ; ****************************************
 ; * SERINBYTE
-; * ARG0 - 0 if no data; > 0 otherwise
-; * ARG1 - the byte of data
+; * BLKSERINBYTE[0] - 0 if no data; > 0 otherwise
+; * BLKSERINBYTE[1] - the byte of data
 ; ****************************************
 SERINBYTE:
 
     lda #$00
-    sta ARG0
-    sta ARG1
+    sta BLKSERINBYTE
+    sta BLKSERINBYTE+1
 
     ; read a byte from Arduino
     stz VIADDRB         ; port b all input
@@ -162,9 +137,9 @@ SERINBYTE:
     beq SERINBYTE2      ; no?
 
     lda VIAPORTB        ; load byte from port b
-    sta ARG1            ; store the byte
+    sta BLKSERINBYTE+1  ; store the byte
     lda #$01            ; indicate data was read
-    sta ARG0            ; store the flag
+    sta BLKSERINBYTE    ; store the flag
 
 SERINBYTE2:
     lda #%00000010      ; reset CE
@@ -181,7 +156,7 @@ SEROUTBYTE:
     lda #%11111111      ; port b is all output
     sta VIADDRB
 
-    lda ARG0            ; get char
+    lda BLKSEROUTBYTE   ; get char
     sta VIAPORTB        ; put a value on port B
 
     lda #%00000001      ; Arduino read/chip enable/data
