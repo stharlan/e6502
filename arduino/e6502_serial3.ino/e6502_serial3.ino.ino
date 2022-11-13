@@ -1,112 +1,205 @@
 
-#define CA1 22
-#define CA2 24
-#define CB1 38
-#define CB2 19
-#define IRQB 7
+#define RS_A0 48  // 0=instr; 1=data
+#define CE_A1 21  // 0=disable; 1=enable (needs interrupt pin)
+#define RW_A2 52  // 0=read; 1=write (from Arduino perspective)
+#define IRQB  46
+#define OUTR1 44  // out register 1
 
-int PAX[8] = {37,35,33,31,29,27,25,23};
-int PBX[8] = {53,51,49,47,45,43,41,39};
+int PBX[8] = {39,41,43,45,47,49,51,53};
+
+void setPortBInput()
+{
+  pinMode(PBX[0], INPUT);
+  pinMode(PBX[1], INPUT);
+  pinMode(PBX[2], INPUT);
+  pinMode(PBX[3], INPUT);
+  pinMode(PBX[4], INPUT);
+  pinMode(PBX[5], INPUT);
+  pinMode(PBX[6], INPUT);
+  pinMode(PBX[7], INPUT);
+}
+
+void setPortBOutput()
+{
+  pinMode(PBX[0], OUTPUT);
+  pinMode(PBX[1], OUTPUT);
+  pinMode(PBX[2], OUTPUT);
+  pinMode(PBX[3], OUTPUT);
+  pinMode(PBX[4], OUTPUT);
+  pinMode(PBX[5], OUTPUT);
+  pinMode(PBX[6], OUTPUT);
+  pinMode(PBX[7], OUTPUT);
+}
+
+void debugAllLines()
+{
+  Serial.print("DEBUG: RS_A0 is ");
+  Serial.println(digitalRead(RS_A0) ? "HIGH" : "LOW");
+  Serial.print("DEBUG: CE_A1 is ");
+  Serial.println(digitalRead(CE_A1) ? "HIGH" : "LOW");
+  Serial.print("DEBUG: RW_A2 is ");
+  Serial.println(digitalRead(RW_A2) ? "HIGH" : "LOW");
+  Serial.print("DEBUG: IRQB is ");
+  Serial.println(digitalRead(IRQB) ? "HIGH" : "LOW");
+  Serial.print("DEBUG: OUTR1 is ");
+  Serial.println(digitalRead(OUTR1) ? "HIGH" : "LOW");
+
+  for(int i=0; i<8; i++)
+  {
+    Serial.print("DEBUG: Data line ");
+    Serial.print(i);
+    Serial.print(" is ");
+    Serial.println(digitalRead(PBX[i]) ? "HIGH" : "LOW");
+  }  
+}
+
+byte readDataFromPins()
+{
+  setPortBInput();
+  byte result = digitalRead(PBX[0]);
+  result += digitalRead(PBX[1]) << 1;
+  result += digitalRead(PBX[2]) << 2;
+  result += digitalRead(PBX[3]) << 3;
+  result += digitalRead(PBX[4]) << 4;
+  result += digitalRead(PBX[5]) << 5;
+  result += digitalRead(PBX[6]) << 6;
+  result += digitalRead(PBX[7]) << 7;
+  //Serial.println(digitalRead(PBX[0]));
+  //Serial.println(digitalRead(PBX[1]));
+  //Serial.println(digitalRead(PBX[2]));
+  //Serial.println(digitalRead(PBX[3]));
+  //Serial.println(digitalRead(PBX[4]));
+  //Serial.println(digitalRead(PBX[5]));
+  //Serial.println(digitalRead(PBX[6]));
+  //Serial.println(digitalRead(PBX[7]));
+  return result;
+}
+
+void writeDataToPins(byte b)
+{
+  setPortBOutput();
+  digitalWrite(PBX[0], b & 0x01);
+  digitalWrite(PBX[1], b & 0x02);
+  digitalWrite(PBX[2], b & 0x04);
+  digitalWrite(PBX[3], b & 0x08);
+  digitalWrite(PBX[4], b & 0x10);
+  digitalWrite(PBX[5], b & 0x20);
+  digitalWrite(PBX[6], b & 0x40);
+  digitalWrite(PBX[7], b & 0x80);
+}
 
 void setup() {
 
   Serial.begin(57600);
   Serial.println();
-  Serial.println("e6502 serial v1.0");
+  Serial.println("e6502 serial v2.0");
 
-  // put your setup code here, to run once:
-  for(int i=0; i<8; i++)
-  {
-    digitalWrite(PAX[i], LOW);
-    pinMode(PAX[i], OUTPUT);
-    pinMode(PBX[i], INPUT);
-  }
+  digitalWrite(IRQB, HIGH);
+  digitalWrite(RS_A0, LOW);
+  digitalWrite(CE_A1, LOW);
+  digitalWrite(RW_A2, LOW);
+  digitalWrite(OUTR1, LOW);
 
-  // interrupt on CB2
-  // triggered when data ready
-  pinMode(CB2, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(CB2), on_cb2, FALLING);
+  pinMode(IRQB, OUTPUT);
+  pinMode(RS_A0, INPUT);
+  pinMode(CE_A1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(CE_A1), on_ce, FALLING);
+  pinMode(RW_A2, INPUT);
+  pinMode(OUTR1, OUTPUT);
 
-  // M -> P
-  // pulse CB1 on data taken
-  digitalWrite(CB1, HIGH);
-  pinMode(CB1, OUTPUT);
+  // default to input
+  setPortBInput();
 
-  // P -> M
-  // pulse CA1 on data ready
-  digitalWrite(CA1, HIGH);
-  pinMode(CA1, OUTPUT);
-
-  pinMode(CA2, INPUT);
-
-  pinMode(IRQB, INPUT);
-
-  Serial.print("CA1 is ");
-  Serial.println(digitalRead(CA1) ? "HIGH" : "LOW");
-  Serial.print("CA2 is ");
-  Serial.println(digitalRead(CA2) ? "HIGH" : "LOW");
-  Serial.print("CB1 is ");
-  Serial.println(digitalRead(CB1) ? "HIGH" : "LOW");
-  Serial.print("CB2 is ");
-  Serial.println(digitalRead(CB2) ? "HIGH" : "LOW");
+  debugAllLines();
 }
 
-// when CB2 goes low, 
-// the MP is sending a char
-void on_cb2()
+void triggerIRQB()
 {
-  // data ready to read
-  //Serial.println("CB2 went low, reading pins...");
-  int data = 0;
-  for(int dp=0; dp<8; dp++)
+  digitalWrite(IRQB, LOW);
+  digitalWrite(IRQB, HIGH);  
+}
+
+int action = 0;
+int g_rs = 0;
+int g_rw = 0;
+
+void on_ce()
+{
+  if(action == 0)
   {
-    // hi bit first
-    int v = digitalRead(PBX[dp]);
-    //Serial.print(v);
-    data = (data << 1) + v;
+    g_rs = digitalRead(RS_A0);
+    g_rw = digitalRead(RW_A2);
+    action = 1;  
   }
-  //Serial.println();
-  //Serial.print("Data ");
-  //Serial.println(data);
+}
 
-  // pulse CA1 low in response
-  //Serial.println("Pulsing CB1 LOW...");
-  digitalWrite(CB1, LOW);
-  digitalWrite(CB1, HIGH);
+void writeByte(byte outByte, bool hasMore)
+{
+  digitalWrite(OUTR1, hasMore ? HIGH : LOW);
+  writeDataToPins(outByte & 0xff);
+  triggerIRQB();  
+}
 
-  //Serial.print("Printing char: ");
-  char cc = (char)data;
-  Serial.print(cc);
-  
-  //Serial.println("on_cb2 done.");
+void writeByteIfAvailable()
+{
+    //int outByte = 0xfe;
+    //writeByte(outByte, true);
+    //Serial.println("DEBUG: Arduino write data...");
+    //Serial.print("Out byte = ");
+    //Serial.println(outByte, HEX);
+    
+    if(Serial.available() > 0)
+    {
+      int outByte = Serial.read();
+      writeByte(outByte, true);
+      //Serial.println("DEBUG: Arduino write data...");
+      //Serial.print("Out byte = ");
+      //Serial.println(outByte, HEX);
+    } else { 
+      writeByte(0x00, false);
+      //Serial.println("DEBUG: Arduino write data...");
+      //Serial.println("No data for output.");
+    }
 }
 
 void loop() 
 {
-  if(Serial.available())
+  if(action == 1)
   {
-    //Serial.println("serial data available");
-    int data = Serial.read();
-    //if((data == 0x0a) || (data > 0x1f && data <= 0x7f)) 
-    //{
-      //Serial.println("Setting pins A");
-      //Serial.print("Sending ");
-      //Serial.print((char)data);
-      //Serial.print(" ");
-      //Serial.println(data);
-      //Serial.println("Ready to send...");
-      for(int dp=7; dp>-1; dp--)
-      {
-        digitalWrite(PAX[dp], data & 0x01 ? HIGH : LOW);
-        data = data >> 1;
+    //Serial.println("ACTION!");
+    if(g_rs)
+    {
+      // data
+      if(g_rw) {
+        // Arduino write
+        writeByteIfAvailable();
+        action = 0;
+      } else {
+        // Arduino read
+        byte inByte = readDataFromPins();
+        Serial.print((char)inByte);          
+        triggerIRQB();
+        action = 0;
+        //Serial.println("DEBUG: Arduino read data...");
+        //Serial.print("In byte = ");
       }
-      //Serial.println("Pulsing CA1...");
-      digitalWrite(CA1, LOW);
-      delayMicroseconds(1);
-      digitalWrite(CA1, HIGH);
-
-      // wait for IRQB to go high
-      while(!digitalRead(IRQB)) {}
-    //}
+    }
+    else
+    {
+      // instr
+      if(g_rw) {
+        // Arduino write
+        writeByteIfAvailable();
+        action = 0;
+      } else {
+        // Arduino read
+        byte inByte = readDataFromPins();
+        Serial.print((char)inByte);
+        triggerIRQB();
+        action = 0;
+        //Serial.println("DEBUG: Arduino read instr...");
+        //Serial.print("In byte = ");
+      }
+    }
   }
 }
