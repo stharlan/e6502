@@ -115,11 +115,59 @@ MAIN_LOOP:
 
     lda #%11111111      ; port b output
     sta VIADDRB
+
     lda BLKSERINBYTE+1  ; get char
     sta BLKSEROUTBYTE   ; store in arg0
     jsr SEROUTBYTE      ; echo back
+    jsr SEROUTCRLF
+
+    lda BLKSERINBYTE+1  ; get char
+    sta BLKB2C
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    jsr SEROUTCRLF
 
     jmp MAIN_LOOP_SETUP
+
+; **************************************************
+; * SEROUTCRLF
+; **************************************************
+SEROUTCRLF:
+    lda #$0d            ; get char
+    sta BLKSEROUTBYTE   ; store in arg0
+    jsr SEROUTBYTE      ; echo back
+    lda #$0a            ; get char
+    sta BLKSEROUTBYTE   ; store in arg0
+    jsr SEROUTBYTE      ; echo back
+    rts
+    
+; **************************************************
+; * B2C
+; * BLKB2C[0] - the input byte
+; * BLKB2C[1] - output lo nibble char
+; * BLKB2C[2] - output hi nibble char
+; **************************************************
+B2C:
+    lda BLKB2C      ; get input byte
+    lsr             ; shift bits right 4 times
+    lsr
+    lsr
+    lsr
+    and #%00001111  ; get lower nibble of a    
+    tax             ; lower nibble is offset (0-15)
+    lda TXTDGTS,X   ; get char
+    sta BLKB2C+2    ; store hi nibble char
+    lda BLKB2C
+    and #%00001111  ; get lower nibble of a    
+    tax             ; put nibble in x (0-15)
+    lda TXTDGTS,X   ; get digit from digit table offset x
+    sta BLKB2C+1    ; store lo nibble char
+    rts
 
 ; ****************************************
 ; * SERINBYTE
