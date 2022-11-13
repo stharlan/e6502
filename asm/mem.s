@@ -48,6 +48,12 @@ ZP1H            = $0001
 BLKSEROUTBYTE   = $1000     ; [0] = char to output
 BLKSERINBYTE    = $1001     ; [0] = (return) 0 if no data; > 0 otherwise
                             ; [1] = (return) the byte read
+CMDBUFN         = $1003     ; num of chars in cmd buf
+BLKB2C          = $1004     ; [0] = input byte
+                            ; [1] = output lo nibble char
+                            ; [2] = output hi nibble char
+
+CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
 
     ; Memory map:
     ; $0000 - $7fff = RAM
@@ -64,6 +70,7 @@ BLKSERINBYTE    = $1001     ; [0] = (return) 0 if no data; > 0 otherwise
 
 TXTREADY    .db     "8BOB ready",$0d,$0a,$00
 TXTREADYA   .word   TXTREADY
+TXTDGTS     .db     "0123456789ABCDEF"
 
 ; ****************************************
 ; * main loop (RESET vector)
@@ -72,8 +79,6 @@ RESET:
 
                         ; SETUP
 
-    lda #%00000011      ; ACR enable latching on PA and PB
-    sta VIAACR          ; store value into ACR
     lda #%00000111      ; bottom 3 bits are output
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
     lda #%11111111      ; port b is all output (initially)
@@ -81,8 +86,6 @@ RESET:
     lda #%00000010      ; Arduino read/ce disable/instr
     sta VIAPORTA        ; zero out PORTA
     stz VIAPORTB        ; set port b to zero's
-    lda #$ff
-    sta VIAIFR          ; clear the IFR
 
     cli                 ; clear interrupt disable flag
                         ; READY
@@ -96,23 +99,27 @@ RESET2:
 
 RESET3:
     lda (ZP1L),Y
-    beq MAIN_LOOP
+    beq MAIN_LOOP_SETUP
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
     iny
     jmp RESET3          ; END output a ready message
 
-MAIN_LOOP:
+MAIN_LOOP_SETUP:
+    stz VIADDRB         ; port b input
 
+MAIN_LOOP:
     jsr SERINBYTE       ; get a character
     lda BLKSERINBYTE    ; load result flag
     beq MAIN_LOOP       ; none available
 
+    lda #%11111111      ; port b output
+    sta VIADDRB
     lda BLKSERINBYTE+1  ; get char
     sta BLKSEROUTBYTE   ; store in arg0
     jsr SEROUTBYTE      ; echo back
 
-    jmp MAIN_LOOP
+    jmp MAIN_LOOP_SETUP
 
 ; ****************************************
 ; * SERINBYTE
@@ -126,8 +133,6 @@ SERINBYTE:
     sta BLKSERINBYTE+1
 
     ; read a byte from Arduino
-    stz VIADDRB         ; port b all input
-
     lda #%00000101      ; Arduino write/chip enable/data
     sta VIAPORTA
     wai                 ; wait for interrupt
@@ -138,14 +143,11 @@ SERINBYTE:
 
     lda VIAPORTB        ; load byte from port b
     sta BLKSERINBYTE+1  ; store the byte
-    lda #$01            ; indicate data was read
-    sta BLKSERINBYTE    ; store the flag
+    inc BLKSERINBYTE    ; set flag (> 0)
 
 SERINBYTE2:
     lda #%00000010      ; reset CE
     sta VIAPORTA
-    lda #$ff
-    sta VIAIFR          ; clear the IFR
     rts
 
 ; ****************************************
@@ -153,31 +155,24 @@ SERINBYTE2:
 ; ****************************************
 SEROUTBYTE:
     ; write a byte to Arduino: SUCCESS
-    lda #%11111111      ; port b is all output
-    sta VIADDRB
-
     lda BLKSEROUTBYTE   ; get char
     sta VIAPORTB        ; put a value on port B
-
     lda #%00000001      ; Arduino read/chip enable/data
     sta VIAPORTA        ; trigger arduino interrupt
     wai                 ; wait for 6502 interrupt
                         ; will be triggered by Arduino
-
     lda #%00000010      ; reset CE
     sta VIAPORTA
-    lda #$ff            ; clear the IFR
-    sta VIAIFR          
     rts
 
 ON_NMI:
 ON_IRQ:
-    lda VIAPORTA
-    and #%00000010      ; bit 1 set?
-    bne IRQDONE         ; yes? ok - nothing to do
-    lda #%00000010      ; no? reset (set to 1)
-    sta VIAPORTA        ; zero out PORTA
-IRQDONE:
+    ;lda VIAPORTA
+    ;and #%00000010      ; bit 1 set?
+    ;bne IRQDONE         ; yes? ok - nothing to do
+    ;lda #%00000010      ; no? reset (set to 1)
+    ;sta VIAPORTA        ; zero out PORTA
+;IRQDONE:
     rti
 
     ; NMI, reset and IRQ vectors
