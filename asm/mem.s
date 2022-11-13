@@ -79,6 +79,9 @@ RESET:
 
                         ; SETUP
 
+    stz CMDBUFN
+    stz CMDBUF
+
     lda #%00000111      ; bottom 3 bits are output
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
     lda #%11111111      ; port b is all output (initially)
@@ -109,9 +112,26 @@ MAIN_LOOP_SETUP:
     stz VIADDRB         ; port b input
 
 MAIN_LOOP:
+
+    ; CHECK FOR AVAILABLE BYTE
+
     jsr SERINBYTE       ; get a character
     lda BLKSERINBYTE    ; load result flag
     beq MAIN_LOOP       ; none available
+
+    ; STORE IN COMMAND BUFFER
+
+    ldy CMDBUFN         ; get num chars in cmdbuf
+    cpy #$ff            ; see if it's 255
+    beq MAIN_LOOP       ; nothing to get, main loop
+
+    lda BLKSERINBYTE+1  ; get byte
+    sta CMDBUF,Y        ; store in cmd buf at current pos
+    inc CMDBUFN         ; increment command buffer nchars
+    lda #$00
+    sta CMDBUF,Y        ; store zero at next pos (cmdbuf always ends with zero)
+
+    ; OUTPUT SOME DEBUG INFO
 
     lda #%11111111      ; port b output
     sta VIADDRB
@@ -121,7 +141,7 @@ MAIN_LOOP:
     jsr SEROUTBYTE      ; echo back
     jsr SEROUTCRLF
 
-    lda BLKSERINBYTE+1  ; get char
+    lda BLKSERINBYTE+1  ; convert char to byte
     sta BLKB2C
     jsr B2C
     lda BLKB2C+2
@@ -132,6 +152,17 @@ MAIN_LOOP:
     jsr SEROUTBYTE
     jsr SEROUTCRLF
 
+    lda CMDBUFN
+    sta BLKB2C
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    jsr SEROUTCRLF
+    
     jmp MAIN_LOOP_SETUP
 
 ; **************************************************
@@ -215,12 +246,6 @@ SEROUTBYTE:
 
 ON_NMI:
 ON_IRQ:
-    ;lda VIAPORTA
-    ;and #%00000010      ; bit 1 set?
-    ;bne IRQDONE         ; yes? ok - nothing to do
-    ;lda #%00000010      ; no? reset (set to 1)
-    ;sta VIAPORTA        ; zero out PORTA
-;IRQDONE:
     rti
 
     ; NMI, reset and IRQ vectors
