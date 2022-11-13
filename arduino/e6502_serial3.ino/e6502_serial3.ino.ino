@@ -33,6 +33,7 @@ void setPortBOutput()
 
 void debugAllLines()
 {
+  Serial.println("========================================");
   Serial.print("DEBUG: RS_A0 is ");
   Serial.println(digitalRead(RS_A0) ? "HIGH" : "LOW");
   Serial.print("DEBUG: CE_A1 is ");
@@ -51,6 +52,7 @@ void debugAllLines()
     Serial.print(" is ");
     Serial.println(digitalRead(PBX[i]) ? "HIGH" : "LOW");
   }  
+  Serial.println("========================================");
 }
 
 byte readDataFromPins()
@@ -64,14 +66,6 @@ byte readDataFromPins()
   result += digitalRead(PBX[5]) << 5;
   result += digitalRead(PBX[6]) << 6;
   result += digitalRead(PBX[7]) << 7;
-  //Serial.println(digitalRead(PBX[0]));
-  //Serial.println(digitalRead(PBX[1]));
-  //Serial.println(digitalRead(PBX[2]));
-  //Serial.println(digitalRead(PBX[3]));
-  //Serial.println(digitalRead(PBX[4]));
-  //Serial.println(digitalRead(PBX[5]));
-  //Serial.println(digitalRead(PBX[6]));
-  //Serial.println(digitalRead(PBX[7]));
   return result;
 }
 
@@ -107,7 +101,6 @@ void setup() {
   pinMode(RW_A2, INPUT);
   pinMode(OUTR1, OUTPUT);
 
-  // default to input
   setPortBInput();
 
   debugAllLines();
@@ -141,24 +134,13 @@ void writeByte(byte outByte, bool hasMore)
 }
 
 void writeByteIfAvailable()
-{
-    //int outByte = 0xfe;
-    //writeByte(outByte, true);
-    //Serial.println("DEBUG: Arduino write data...");
-    //Serial.print("Out byte = ");
-    //Serial.println(outByte, HEX);
-    
+{   
     if(Serial.available() > 0)
     {
       int outByte = Serial.read();
       writeByte(outByte, true);
-      //Serial.println("DEBUG: Arduino write data...");
-      //Serial.print("Out byte = ");
-      //Serial.println(outByte, HEX);
     } else { 
       writeByte(0x00, false);
-      //Serial.println("DEBUG: Arduino write data...");
-      //Serial.println("No data for output.");
     }
 }
 
@@ -166,7 +148,6 @@ void loop()
 {
   if(action == 1)
   {
-    //Serial.println("ACTION!");
     if(g_rs)
     {
       // data
@@ -180,8 +161,6 @@ void loop()
         Serial.print((char)inByte);          
         triggerIRQB();
         action = 0;
-        //Serial.println("DEBUG: Arduino read data...");
-        //Serial.print("In byte = ");
       }
     }
     else
@@ -197,8 +176,6 @@ void loop()
         Serial.print((char)inByte);
         triggerIRQB();
         action = 0;
-        //Serial.println("DEBUG: Arduino read instr...");
-        //Serial.print("In byte = ");
       }
     }
   }

@@ -40,6 +40,9 @@ VIAIFR          = $800d
 VIAIER          = $800e
 VIAPORTA_NOH    = $800f
 
+ZP1L            = $0000
+ZP1H            = $0001
+
 ARG0            = $1000
 ARG1            = $1001
 
@@ -55,6 +58,9 @@ ARG1            = $1001
 
     ; code starts at a000
     .org $a000
+
+TXTREADY    .db     "8BOB ready",$0d,$0a,$00
+TXTREADYA   .word   TXTREADY
 
 ; ****************************************
 ; * main loop (RESET vector)
@@ -79,37 +85,59 @@ RESET:
                         ; READY
 
 RESET2:
-    lda #'R'
+    lda TXTREADYA
+    sta ZP1L
+    lda TXTREADYA+1
+    sta ZP1H
+    ldy #$00
+
+RESET3:
+    lda (ZP1L),Y
+    beq MAIN_LOOP
     sta ARG0
     jsr SEROUTBYTE
+    iny
+    jmp RESET3
 
-    lda #'E'
-    sta ARG0
-    jsr SEROUTBYTE
+    ;lda #'R'
+    ;sta ARG0
+    ;jsr SEROUTBYTE
 
-    lda #'A'
-    sta ARG0
-    jsr SEROUTBYTE
+    ;lda #'E'
+    ;sta ARG0
+    ;jsr SEROUTBYTE
 
-    lda #'D'
-    sta ARG0
-    jsr SEROUTBYTE
+    ;lda #'A'
+    ;sta ARG0
+    ;jsr SEROUTBYTE
 
-    lda #'Y'
-    sta ARG0
-    jsr SEROUTBYTE
+    ;lda #'D'
+    ;sta ARG0
+    ;jsr SEROUTBYTE
 
-INFINITE_LOOP:
+    ;lda #'Y'
+    ;sta ARG0
+    ;jsr SEROUTBYTE
+
+    ;lda #$0d
+    ;sta ARG0
+    ;jsr SEROUTBYTE
+
+    ;lda #$0a
+    ;sta ARG0
+    ;jsr SEROUTBYTE
+
+MAIN_LOOP:
 
     jsr SERINBYTE       ; get a character
     lda ARG0            ; load result flag
-    beq INFINITE_LOOP   ; none available
+    beq MAIN_LOOP   ; none available
 
     lda ARG1            ; get char
     sta ARG0            ; store in arg0
     jsr SEROUTBYTE      ; echo back
 
-    jmp INFINITE_LOOP
+    jmp MAIN_LOOP
 
 ; ****************************************
 ; * SERINBYTE
