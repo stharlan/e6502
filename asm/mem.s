@@ -52,6 +52,7 @@ CMDBUFN         = $1003     ; num of chars in cmd buf
 BLKB2C          = $1004     ; [0] = input byte
                             ; [1] = output lo nibble char
                             ; [2] = output hi nibble char
+CMDBUFX         = $1007     ; cmd buffer execute = 1
 
 CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
 
@@ -81,6 +82,7 @@ RESET:
 
     stz CMDBUFN
     stz CMDBUF
+    stz CMDBUFX
 
     lda #%00000111      ; bottom 3 bits are output
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
@@ -118,6 +120,10 @@ MAIN_LOOP:
     jsr SERINBYTE       ; get a character
     lda BLKSERINBYTE    ; load result flag
     beq MAIN_LOOP       ; none available
+    lda CMDBUFX         ; check execute flag
+                        ; TODO next line is parse and execute
+                        ; but, for now, just re-loop
+    bne MAIN_LOOP       ; if > 0, parse and execute
 
     ; STORE IN COMMAND BUFFER
 
@@ -125,6 +131,18 @@ MAIN_LOOP:
     cpy #$ff            ; see if it's 255
     beq MAIN_LOOP       ; nothing to get, main loop
 
+    lda BLKSERINBYTE+1  ; get byte
+    cmp #$0a            ; compare to 0x0a
+    beq CMDBUFSETX      ; yes? process crlf
+    cmp #$0d            ; compare to 0x0d
+    beq CMDBUFSETX      ; yes? process crlf
+    jmp MAIN_LOOP1      ; no? keep going
+
+CMDBUFSETX:
+    inc CMDBUFX         ; set execute flag
+    bne MAIN_LOOP       ; if > 0, parse and execute
+
+MAIN_LOOP1:
     lda BLKSERINBYTE+1  ; get byte
     sta CMDBUF,Y        ; store in cmd buf at current pos
     inc CMDBUFN         ; increment command buffer nchars
