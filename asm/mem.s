@@ -53,6 +53,21 @@ BLKB2C          = $1004     ; [0] = input byte
                             ; [1] = output lo nibble char
                             ; [2] = output hi nibble char
 CMDBUFX         = $1007     ; cmd buffer execute = 1
+BLKPARSEADDR    = $1008     ; [0] = hi byte; hi nibble
+                            ; [1] = hi byte; lo nibble
+                            ; [2] = lo byte; hi nibble
+                            ; [3] = lo byte; lo nibble
+                            ; [4] = addr lo byte
+                            ; [5] = addr hi byte
+                            ; [6] = err code (0 if success)
+BLKHC2B         = $100f     ; [0] - the input char
+                            ; [1] - output lo nibble char
+BLKPARSECMD     = $1011     ; [0] - command char
+                            ; [1] - addr lo/lo byte
+                            ; [2] - addr lo/hi byte
+                            ; [3] - addr hi/lo byte
+                            ; [4] - addr hi/hi byte
+                            ; [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
 
 CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
 
@@ -78,7 +93,9 @@ TXTDGTS     .db     "0123456789ABCDEF"
 ; ****************************************
 RESET:
 
-                        ; SETUP
+    ; DEBUG TESTING
+
+    ; SETUP
 
     stz CMDBUFN
     stz CMDBUF
@@ -184,6 +201,88 @@ MAIN_LOOP1:
     jmp MAIN_LOOP_SETUP
 
 ; **************************************************
+; * PARSECMD
+; * [0] - command char
+; * [1] - addr lo/lo byte
+; * [2] - addr lo/hi byte
+; * [3] - addr hi/lo byte
+; * [4] - addr hi/hi byte
+; * [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
+; **************************************************
+PARSECMD:
+    rts
+
+; **************************************************
+; * PARSEADDR
+; * Parses 4 chars and turns them into a 2 byte
+; * address.
+; * [0] = hi byte; hi nibble
+; * [1] = hi byte; lo nibble
+; * [2] = lo byte; hi nibble
+; * [3] = lo byte; lo nibble
+; * [4] = addr lo byte
+; * [5] = addr hi byte
+; * [6] = err code (0 if success)
+; **************************************************
+PARSEADDR:
+    stz BLKPARSEADDR+4
+    stz BLKPARSEADDR+5
+    stz BLKPARSEADDR+6      ; reset error
+
+    ldx #$00
+
+PARSEADDRA:
+    lda BLKPARSEADDR,X      ; load char at offset x (0-3)
+    sta BLKHC2B
+    jsr HC2B                ; call hex char to byte
+    lda BLKHC2B+1           ; check result
+    cmp #$10
+    beq PARSEADDRERR        ; yes? error
+    cpx #$00
+    bne PARSEADDR1
+    asl                     ; shift left 4x
+    asl                     ; to high nibble
+    asl
+    asl
+    sta BLKPARSEADDR+5      ; store hi nibble in hi byte
+    inx
+    jmp PARSEADDRA
+
+PARSEADDR1:
+    cpx #$01
+    bne PARSEADDR2
+    clc
+    adc BLKPARSEADDR+5
+    sta BLKPARSEADDR+5      ; store hi+lo nibble in hi byte
+    inx
+    jmp PARSEADDRA
+
+PARSEADDR2:
+    cpx #$02
+    bne PARSEADDR3
+    asl                     ; shift left 4x
+    asl                     ; to high nibble
+    asl
+    asl
+    sta BLKPARSEADDR+4      ; store hi nibble in lo byte
+    inx
+    jmp PARSEADDRA
+
+PARSEADDR3:
+    cpx #$03
+    bne PARSEADDRERR
+    clc
+    adc BLKPARSEADDR+4
+    sta BLKPARSEADDR+4      ; store hi+lo nibble in lo byte
+    jmp PARSEADDRDONE
+
+PARSEADDRERR:
+    inc BLKPARSEADDR+6      ; set error
+
+PARSEADDRDONE:
+    rts
+
+; **************************************************
 ; * SEROUTCRLF
 ; **************************************************
 SEROUTCRLF:
@@ -194,7 +293,73 @@ SEROUTCRLF:
     sta BLKSEROUTBYTE   ; store in arg0
     jsr SEROUTBYTE      ; echo back
     rts
-    
+
+; **************************************************
+; * HC2B - hex char to byte
+; * BLKHC2B[0] - the input char
+; * BLKHC2B[1] - output lo nibble char ($10 is err)
+; **************************************************
+HC2B:
+    lda BLKHC2B
+    sec
+    sbc #'0'
+    bmi HC2BERR         ; < '0', error
+
+    lda #'9'
+    sec
+    sbc BLKHC2B
+    bmi HC2BAFC         ; > '9', try A-F
+
+    ; the char is 0-9
+    lda BLKHC2B
+    sec
+    sbc #'0'            ; a is now 0-9
+    sta BLKHC2B+1       ; store the value
+    jmp HC2BDONE        ; done
+
+HC2BAFC:
+    lda BLKHC2B
+    sec
+    sbc #'A'
+    bmi HC2BERR         ; < 'A', error
+
+    lda #'F'
+    sec
+    sbc BLKHC2B
+    bmi HC2BAFL         ; > 'F', try A-F
+
+    ; the char is A-F
+    lda BLKHC2B
+    sec
+    sbc #$37            ; is now A-F
+    sta BLKHC2B+1       ; store the value
+    jmp HC2BDONE        ; done
+
+HC2BAFL:
+    lda BLKHC2B
+    sec
+    sbc #'a'
+    bmi HC2BERR         ; < 'A', error
+
+    lda #'f'
+    sec
+    sbc BLKHC2B
+    bmi HC2BERR         ; > 'F', try A-F
+
+    ; the char is A-F
+    lda BLKHC2B
+    sec
+    sbc #$57            ; is now A-F
+    sta BLKHC2B+1       ; store the value
+    jmp HC2BDONE        ; done
+
+HC2BERR:
+    lda #$10            ; err > 0x0f (#$10 is error)
+    sta BLKHC2B+1       ; store the value
+
+HC2BDONE:
+    rts
+
 ; **************************************************
 ; * B2C
 ; * BLKB2C[0] - the input byte
