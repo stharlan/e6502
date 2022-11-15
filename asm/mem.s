@@ -68,6 +68,7 @@ BLKPARSECMD     = $1011     ; [0] - command char
                             ; [3] - addr hi/lo byte
                             ; [4] - addr hi/hi byte
                             ; [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
+                            ; [6] - error code: 0 = success
 
 CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
 
@@ -94,6 +95,24 @@ TXTDGTS     .db     "0123456789ABCDEF"
 RESET:
 
     ; DEBUG TESTING
+    lda #'d'
+    sta CMDBUF
+    lda #'2'
+    sta CMDBUF+1
+    lda #'A'
+    sta CMDBUF+2
+    lda #'5'
+    sta CMDBUF+3
+    lda #'0'
+    sta CMDBUF+4
+    lda #$00
+    sta CMDBUF+5
+    lda #$05
+    sta CMDBUFN
+    jsr PARSECMD
+
+    ; TODO test d2000:
+    ; TODO test d2000::
 
     ; SETUP
 
@@ -208,8 +227,67 @@ MAIN_LOOP1:
 ; * [3] - addr hi/lo byte
 ; * [4] - addr hi/hi byte
 ; * [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
+; * [6] - err code: 0 = success
 ; **************************************************
 PARSECMD:
+    stz BLKPARSECMD         ; initialize return values
+    stz BLKPARSECMD+1
+    stz BLKPARSECMD+2
+    stz BLKPARSECMD+3
+    stz BLKPARSECMD+4
+    lda #$01                ; default is one byte
+    sta BLKPARSECMD+5
+    stz BLKPARSECMD+6
+
+    lda CMDBUFN             ; check n chars in cmd buf
+    beq PARSEERR            ; if none, error
+
+    ldx #$00
+    lda CMDBUF,X            ; load first char
+    sta BLKPARSECMD         ; the command char
+
+    lda CMDBUFN             ; check n chars in cmd buf
+    sec
+    sbc #$05
+    bmi PARSEERR            ; not enough chars
+
+    inx                     ; load 4 chars to parse an address
+    lda CMDBUF,X
+    sta BLKPARSEADDR
+    inx
+    lda CMDBUF,X
+    sta BLKPARSEADDR+1
+    inx
+    lda CMDBUF,X
+    sta BLKPARSEADDR+2
+    inx
+    lda CMDBUF,X
+    sta BLKPARSEADDR+3
+    jsr PARSEADDR
+    lda BLKPARSEADDR+6
+    bne PARSEERR            ; parse address error
+    lda BLKPARSEADDR+4
+    sta BLKPARSECMD+1
+    lda BLKPARSEADDR+5
+    sta BLKPARSECMD+2
+
+    inx
+    lda CMDBUF,X
+    cmp #':'
+    bne PARSEDONE
+    lda #$10                ; 16 bytes
+    sta BLKPARSECMD+5
+
+    inx
+    lda CMDBUF,X
+    cmp #':'
+    bne PARSEDONE
+    stz BLKPARSECMD+5       ; 256 bytes    
+
+PARSEERR:
+    inc BLKPARSECMD+6
+
+PARSEDONE:
     rts
 
 ; **************************************************
