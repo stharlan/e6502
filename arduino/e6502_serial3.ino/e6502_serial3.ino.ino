@@ -1,11 +1,23 @@
 
-#define RS_A0 48  // 0=instr; 1=data
-#define CE_A1 21  // 0=disable; 1=enable (needs interrupt pin)
-#define RW_A2 52  // 0=read; 1=write (from Arduino perspective)
-#define IRQB  46
-#define OUTR1 44  // out register 1
+// wa 48, now 15
+#define RS_A0 15  // 0=instr; 1=data
 
-int PBX[8] = {39,41,43,45,47,49,51,53};
+// was 21, now 3
+#define CE_A1 3   // 0=disable; 1=enable (needs interrupt pin)
+
+// was 52, now 16
+#define RW_A2 16  // 0=read; 1=write (from Arduino perspective)
+
+// was 46, now 17
+#define IRQB  17
+
+// was 44, now 18
+#define OUTR1 18  // out register 1
+
+// int PBX[8] = {39,41,43,45,47,49,51,53};
+int PBX[8] = {5,6,7,8,9,10,11,12};
+
+
 
 void setPortBInput()
 {
@@ -123,6 +135,10 @@ void on_ce()
     g_rs = digitalRead(RS_A0);
     g_rw = digitalRead(RW_A2);
     action = 1;  
+  } else {
+    //Serial.print("!");
+    //Serial.print(g_rs);
+    //Serial.println(g_rw);
   }
 }
 
@@ -158,9 +174,10 @@ void loop()
       } else {
         // Arduino read
         byte inByte = readDataFromPins();
-        Serial.print((char)inByte);          
-        triggerIRQB();
+        Serial.print((char)inByte);
+        //Serial.println(inByte,HEX);
         action = 0;
+        triggerIRQB();
       }
     }
     else
@@ -174,8 +191,9 @@ void loop()
         // Arduino read
         byte inByte = readDataFromPins();
         Serial.print((char)inByte);
-        triggerIRQB();
+        //Serial.println(inByte,HEX);
         action = 0;
+        triggerIRQB();
       }
     }
   }

@@ -18,7 +18,7 @@ testf = open('b256.bin', 'wb')
 testf.write(testa)
 testf.close()
 
-ser = serial.Serial("COM5", 57600, timeout=1)
+ser = serial.Serial("COM3", 57600, timeout=1)
 
 def local_upload(filen, offset):
     print("-> reading data")
@@ -52,9 +52,12 @@ signal.signal(signal.SIGINT, handler)
 def thread_func(name):
     while True:
         try:
-            if ser.inWaiting():
-                c = ser.read()
-                print(chr(c[0]),end="")
+            if ser.in_waiting > 0:
+                #c = ser.read()
+                #print(chr(c[0]),end="")
+                #print(c.decode("UTF-8"),end="")
+                c = ser.readline().decode("UTF-8")
+                print(c,end="")
             if ser.closed:
                 break
         except:

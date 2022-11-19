@@ -4,8 +4,10 @@
 #define SHIFT_CLOCK 17
 #define SERIAL_DATA 18
 #define OUTPUT_ENABLE 19
-#define EEPROM_D0 6
-#define EEPROM_D7 13
+//#define EEPROM_D0 6
+//#define EEPROM_D7 13
+#define EEPROM_D0 2
+#define EEPROM_D7 9
 
 byte data_block[64];
 

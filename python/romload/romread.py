@@ -2,7 +2,7 @@
 import serial
 import sys
 
-ser = serial.Serial("COM4", 57600, timeout=1)
+ser = serial.Serial("COM3", 57600, timeout=1)
 
 while True:
     msg = ser.readline()

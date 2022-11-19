@@ -48,29 +48,18 @@ ZP1H            = $0001
 BLKSEROUTBYTE   = $1000     ; [0] = char to output
 BLKSERINBYTE    = $1001     ; [0] = (return) 0 if no data; > 0 otherwise
                             ; [1] = (return) the byte read
-CMDBUFN         = $1003     ; num of chars in cmd buf
-BLKB2C          = $1004     ; [0] = input byte
+BLKB2C          = $1003     ; [0] = input byte
                             ; [1] = output lo nibble char
                             ; [2] = output hi nibble char
-CMDBUFX         = $1007     ; cmd buffer execute = 1
-BLKPARSEADDR    = $1008     ; [0] = hi byte; hi nibble
-                            ; [1] = hi byte; lo nibble
-                            ; [2] = lo byte; hi nibble
-                            ; [3] = lo byte; lo nibble
-                            ; [4] = addr lo byte
-                            ; [5] = addr hi byte
-                            ; [6] = err code (0 if success)
-BLKHC2B         = $100f     ; [0] - the input char
+BLKHC2B         = $1006     ; [0] - the input char
                             ; [1] - output lo nibble char
-BLKPARSECMD     = $1011     ; [0] - command char
-                            ; [1] - addr lo/lo byte
-                            ; [2] - addr lo/hi byte
-                            ; [3] - addr hi/lo byte
-                            ; [4] - addr hi/hi byte
-                            ; [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
-                            ; [6] - error code: 0 = success
-
-CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
+CMDSTATE        = $1008     ; command state
+CMDCHAR         = $1009     ; command char
+CMDADDR1H       = $100a     ; command addr 1 hi byte
+CMDADDR1L       = $100b     ; command addr 1 lo byte
+CMDADDR2H       = $100c     ; command addr 2 hi byte
+CMDADDR2L       = $100d     ; command addr 2 lo byte
+PCMDINPUT       = $100e     ; parse command char input
 
     ; Memory map:
     ; $0000 - $7fff = RAM
@@ -85,40 +74,19 @@ CMDBUF          = $1F00     ; $1F00 - $1FFF (256 bytes)
     ; code starts at a000
     .org $a000
 
-TXTREADY    .db     "8BOB ready",$0d,$0a,$00
+TXTREADY    .db     "BREADBOARD COMPUTER READY...",$0D,$0A,$00
 TXTREADYA   .word   TXTREADY
 TXTDGTS     .db     "0123456789ABCDEF"
+SNTXERR     .db     "SYNTAX ERROR!",$0d,$0a,$00
+SNTXERRA    .word   SNTXERR
 
 ; ****************************************
 ; * main loop (RESET vector)
 ; ****************************************
 RESET:
 
-    ; DEBUG TESTING
-    lda #'d'
-    sta CMDBUF
-    lda #'2'
-    sta CMDBUF+1
-    lda #'A'
-    sta CMDBUF+2
-    lda #'5'
-    sta CMDBUF+3
-    lda #'0'
-    sta CMDBUF+4
-    lda #$00
-    sta CMDBUF+5
-    lda #$05
-    sta CMDBUFN
-    jsr PARSECMD
-
-    ; TODO test d2000:
-    ; TODO test d2000::
-
     ; SETUP
-
-    stz CMDBUFN
-    stz CMDBUF
-    stz CMDBUFX
+    stz CMDSTATE
 
     lda #%00000111      ; bottom 3 bits are output
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
@@ -154,48 +122,57 @@ MAIN_LOOP:
     ; CHECK FOR AVAILABLE BYTE
 
     jsr SERINBYTE       ; get a character
-    lda BLKSERINBYTE    ; load result flag
-    beq MAIN_LOOP       ; none available
-    lda CMDBUFX         ; check execute flag
-                        ; TODO next line is parse and execute
-                        ; but, for now, just re-loop
-    bne MAIN_LOOP       ; if > 0, parse and execute
+    lda BLKSERINBYTE    ; load result flag; char available?
+    bne ECHOCHAR        ; yes? echo it
+    jmp MAIN_LOOP       ; no? loop again
 
-    ; STORE IN COMMAND BUFFER
-
-    ldy CMDBUFN         ; get num chars in cmdbuf
-    cpy #$ff            ; see if it's 255
-    beq MAIN_LOOP       ; nothing to get, main loop
-
-    lda BLKSERINBYTE+1  ; get byte
-    cmp #$0a            ; compare to 0x0a
-    beq CMDBUFSETX      ; yes? process crlf
-    cmp #$0d            ; compare to 0x0d
-    beq CMDBUFSETX      ; yes? process crlf
-    jmp MAIN_LOOP1      ; no? keep going
-
-CMDBUFSETX:
-    inc CMDBUFX         ; set execute flag
-    bne MAIN_LOOP       ; if > 0, parse and execute
-
-MAIN_LOOP1:
-    lda BLKSERINBYTE+1  ; get byte
-    sta CMDBUF,Y        ; store in cmd buf at current pos
-    inc CMDBUFN         ; increment command buffer nchars
-    lda #$00
-    sta CMDBUF,Y        ; store zero at next pos (cmdbuf always ends with zero)
-
-    ; OUTPUT SOME DEBUG INFO
-
-    lda #%11111111      ; port b output
+ECHOCHAR:
+    lda #%11111111      ; port b is all output
     sta VIADDRB
 
-    lda BLKSERINBYTE+1  ; get char
-    sta BLKSEROUTBYTE   ; store in arg0
-    jsr SEROUTBYTE      ; echo back
+    ; ECHO THE INPUT CHAR
+
+    lda BLKSERINBYTE+1
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+
+    cmp #$0a
+    beq XEQCMD
+
+    lda BLKSERINBYTE+1
+    sta PCMDINPUT
+    jsr PARSECMD
+
+    lda CMDSTATE
+    cmp #$ff
+    beq SYNTAX_ERR
+
+    jmp MAIN_LOOP_SETUP
+
+XEQCMD:
+    ; DEBUG: ECHO the command char
+
+    lda #$00
+    sta CMDSTATE        ; reset the command state to zero
+
+    lda CMDCHAR         ; print the command char
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
     jsr SEROUTCRLF
 
-    lda BLKSERINBYTE+1  ; convert char to byte
+    lda #'$'
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda CMDADDR1H
+    sta BLKB2C
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda CMDADDR1L
     sta BLKB2C
     jsr B2C
     lda BLKB2C+2
@@ -206,158 +183,111 @@ MAIN_LOOP1:
     jsr SEROUTBYTE
     jsr SEROUTCRLF
 
-    lda CMDBUFN
-    sta BLKB2C
-    jsr B2C
-    lda BLKB2C+2
+    jmp MAIN_LOOP_SETUP
+
+SYNTAX_ERR:
+    lda #$00
+    sta CMDSTATE        ; reset the command state to zero
+    lda SNTXERRA
+    sta ZP1L
+    lda SNTXERRA+1
+    sta ZP1H
+    ldy #$00
+SYNTAX_ERR1:
+    lda (ZP1L),Y
+    beq SYNTAXERR_END
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
-    lda BLKB2C+1
-    sta BLKSEROUTBYTE
-    jsr SEROUTBYTE
-    jsr SEROUTCRLF
-    
+    iny
+    jmp SYNTAX_ERR1     ; END output a ready message
+SYNTAXERR_END:
     jmp MAIN_LOOP_SETUP
 
 ; **************************************************
+; * STATE TABLE
+; **************************************************
+STATE0A     .word   STATE0      ; offset 0
+STATE1A     .word   STATE1      ; offset 2
+STATE2A     .word   STATE2      ; offset 4
+STATE3A     .word   STATE3      ; offset i*2
+STATE4A     .word   STATE4
+STATE5A     .word   STATE5
+
+; **************************************************
 ; * PARSECMD
-; * [0] - command char
-; * [1] - addr lo/lo byte
-; * [2] - addr lo/hi byte
-; * [3] - addr hi/lo byte
-; * [4] - addr hi/hi byte
-; * [5] - bytes to report: 0x00 (256), 0x01 (1) or 0x10 (16)
-; * [6] - err code: 0 = success
+; * PCMDINPUT - input char to parse
 ; **************************************************
 PARSECMD:
-    stz BLKPARSECMD         ; initialize return values
-    stz BLKPARSECMD+1
-    stz BLKPARSECMD+2
-    stz BLKPARSECMD+3
-    stz BLKPARSECMD+4
-    lda #$01                ; default is one byte
-    sta BLKPARSECMD+5
-    stz BLKPARSECMD+6
+    lda CMDSTATE
+    asl                 ; left shift 1 to get offset
+    tax
+    jmp (STATE0A,X)     ; jump to the state routine
 
-    lda CMDBUFN             ; check n chars in cmd buf
-    beq PARSEERR            ; if none, error
-
-    ldx #$00
-    lda CMDBUF,X            ; load first char
-    sta BLKPARSECMD         ; the command char
-
-    lda CMDBUFN             ; check n chars in cmd buf
-    sec
-    sbc #$05
-    bmi PARSEERR            ; not enough chars
-
-    inx                     ; load 4 chars to parse an address
-    lda CMDBUF,X
-    sta BLKPARSEADDR
-    inx
-    lda CMDBUF,X
-    sta BLKPARSEADDR+1
-    inx
-    lda CMDBUF,X
-    sta BLKPARSEADDR+2
-    inx
-    lda CMDBUF,X
-    sta BLKPARSEADDR+3
-    jsr PARSEADDR
-    lda BLKPARSEADDR+6
-    bne PARSEERR            ; parse address error
-    lda BLKPARSEADDR+4
-    sta BLKPARSECMD+1
-    lda BLKPARSEADDR+5
-    sta BLKPARSECMD+2
-
-    inx
-    lda CMDBUF,X
-    cmp #':'
-    bne PARSEDONE
-    lda #$10                ; 16 bytes
-    sta BLKPARSECMD+5
-
-    inx
-    lda CMDBUF,X
-    cmp #':'
-    bne PARSEDONE
-    stz BLKPARSECMD+5       ; 256 bytes    
-
-PARSEERR:
-    inc BLKPARSECMD+6
-
-PARSEDONE:
+PARSECMDERR:
+    lda #$ff
+    sta CMDSTATE
     rts
 
-; **************************************************
-; * PARSEADDR
-; * Parses 4 chars and turns them into a 2 byte
-; * address.
-; * [0] = hi byte; hi nibble
-; * [1] = hi byte; lo nibble
-; * [2] = lo byte; hi nibble
-; * [3] = lo byte; lo nibble
-; * [4] = addr lo byte
-; * [5] = addr hi byte
-; * [6] = err code (0 if success)
-; **************************************************
-PARSEADDR:
-    stz BLKPARSEADDR+4
-    stz BLKPARSEADDR+5
-    stz BLKPARSEADDR+6      ; reset error
+STATE0:
+    ; COMMAND CHAR
+    lda PCMDINPUT
+    sta CMDCHAR
+    inc CMDSTATE        ; state1
+    rts
 
-    ldx #$00
-
-PARSEADDRA:
-    lda BLKPARSEADDR,X      ; load char at offset x (0-3)
+STATE1:
+STATE2:
+STATE3:
+STATE4:
+    ; 1st char of address $Xxxx
+    ; or 3rd char of address $xxXx
+    lda PCMDINPUT
     sta BLKHC2B
-    jsr HC2B                ; call hex char to byte
-    lda BLKHC2B+1           ; check result
-    cmp #$10
-    beq PARSEADDRERR        ; yes? error
-    cpx #$00
-    bne PARSEADDR1
-    asl                     ; shift left 4x
-    asl                     ; to high nibble
+    jsr HC2B
+    lda BLKHC2B+1
+    cmp #$10            ; illegal char, must be hex
+    beq PARSECMDERR
+    lda CMDSTATE
+    cmp #$01
+    beq STATE1_3
+    cmp #$02
+    beq STATE2_4
+    cmp #$03
+    beq STATE1_3
+    cmp #$04
+    beq STATE2_4
+    jmp PARSECMDERR
+    
+STATE1_3:
+    lda CMDSTATE        ; 1 or 3
+    dec                 ; decrement cmdstate, now 0 or 2
+    lsr                 ; now 0 or 1
+    tax
+    lda BLKHC2B+1       ; load the returned byte 0-f
+    asl                 ; shift it left four times
+    asl                 ; to make it the high byte
     asl
     asl
-    sta BLKPARSEADDR+5      ; store hi nibble in hi byte
-    inx
-    jmp PARSEADDRA
+    sta CMDADDR1H,X     ; store byte in command addr offset x
+                        ; offset 0; STATE1 = H
+                        ; offset 1; STATE2 = L
+    inc CMDSTATE
+    rts
 
-PARSEADDR1:
-    cpx #$01
-    bne PARSEADDR2
-    clc
-    adc BLKPARSEADDR+5
-    sta BLKPARSEADDR+5      ; store hi+lo nibble in hi byte
-    inx
-    jmp PARSEADDRA
+STATE2_4:
+    lda CMDSTATE        ; 2 or 4
+    lsr                 ; div by 2; 1 or 2
+    dec                 ; decrement to 0 or 1
+    tax                 ; transfer index to x
+    lda BLKHC2B+1       ; load the byte
+    clc                 ; clear carry flag
+    adc CMDADDR1H,X     ; add the byte (in a) to 
+                        ; CMDADDR1H or CMDADDR1L (based on x)
+    sta CMDADDR1H,X     ; store a back into CMDADDR1H (or CMDADDR1L)
+    inc CMDSTATE
+    rts
 
-PARSEADDR2:
-    cpx #$02
-    bne PARSEADDR3
-    asl                     ; shift left 4x
-    asl                     ; to high nibble
-    asl
-    asl
-    sta BLKPARSEADDR+4      ; store hi nibble in lo byte
-    inx
-    jmp PARSEADDRA
-
-PARSEADDR3:
-    cpx #$03
-    bne PARSEADDRERR
-    clc
-    adc BLKPARSEADDR+4
-    sta BLKPARSEADDR+4      ; store hi+lo nibble in lo byte
-    jmp PARSEADDRDONE
-
-PARSEADDRERR:
-    inc BLKPARSEADDR+6      ; set error
-
-PARSEADDRDONE:
+STATE5:
     rts
 
 ; **************************************************
