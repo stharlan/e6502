@@ -60,6 +60,7 @@ CMDADDR1L       = $100b     ; command addr 1 lo byte
 CMDADDR2H       = $100c     ; command addr 2 hi byte
 CMDADDR2L       = $100d     ; command addr 2 lo byte
 PCMDINPUT       = $100e     ; parse command char input
+CMDID           = $100f     ; command id
 
     ; Memory map:
     ; $0000 - $7fff = RAM
@@ -87,6 +88,7 @@ RESET:
 
     ; SETUP
     stz CMDSTATE
+    stz CMDID
 
     lda #%00000111      ; bottom 3 bits are output
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
@@ -150,19 +152,98 @@ ECHOCHAR:
     jmp MAIN_LOOP_SETUP
 
 XEQCMD:
+    ; EXECUTE COMMAND
+
+    ldx CMDID
+    jmp (CMD0A,X)       ; jump to the state routine
+
+RETURN_FROM_COMMAND:
+
     ; DEBUG: ECHO the command char
 
-    lda #$00
-    sta CMDSTATE        ; reset the command state to zero
+    stz CMDSTATE
+    stz CMDID
 
-    lda CMDCHAR         ; print the command char
+    ; DEBUG
+    ;lda CMDCHAR         ; print the command char
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;jsr SEROUTCRLF
+
+    ; DEBUG
+    ;lda #'$'
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;lda CMDADDR1H
+    ;sta BLKB2C
+    ;jsr B2C
+    ;lda BLKB2C+2
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;lda BLKB2C+1
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;lda CMDADDR1L
+    ;sta BLKB2C
+    ;jsr B2C
+    ;lda BLKB2C+2
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;lda BLKB2C+1
+    ;sta BLKSEROUTBYTE
+    ;jsr SEROUTBYTE
+    ;jsr SEROUTCRLF
+
+    jmp MAIN_LOOP_SETUP
+
+SYNTAX_ERR:
+    stz CMDSTATE
+    stz CMDID
+
+    lda SNTXERRA
+    sta ZP1L
+    lda SNTXERRA+1
+    sta ZP1H
+    ldy #$00
+SYNTAX_ERR1:
+    lda (ZP1L),Y
+    beq SYNTAXERR_END
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
-    jsr SEROUTCRLF
+    iny
+    jmp SYNTAX_ERR1     ; END output a ready message
+SYNTAXERR_END:
+    jmp MAIN_LOOP_SETUP
 
+; **************************************************
+; * COMMAND TABLE
+; **************************************************
+CMDID_NULL          = $00
+CMDID_OUTBYTE       = $02
+CMDID_OUTBYTE16     = $04
+CMDID_OUTBYTE256    = $06
+
+CMD0A       .word   CMDNULL             ; [0] null
+CMD1A       .word   CMDOUTBYTE          ; [2] out byte 1
+CMD2A       .word   CMDOUTBYTE16        ; [4] out byte 16
+CMD3A       .word   CMDOUTBYTE256       ; [6] out byte 256
+
+; **************************************************
+; * CMDNULL
+; **************************************************
+CMDNULL:
+    jmp RETURN_FROM_COMMAND
+
+; **************************************************
+; * CMDOUTBYTE
+; **************************************************
+CMDOUTBYTE:
     lda #'$'
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
+
+    ; OUTPUT ADDRESS
+
     lda CMDADDR1H
     sta BLKB2C
     jsr B2C
@@ -181,27 +262,44 @@ XEQCMD:
     lda BLKB2C+1
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
-    jsr SEROUTCRLF
 
-    jmp MAIN_LOOP_SETUP
-
-SYNTAX_ERR:
-    lda #$00
-    sta CMDSTATE        ; reset the command state to zero
-    lda SNTXERRA
-    sta ZP1L
-    lda SNTXERRA+1
-    sta ZP1H
-    ldy #$00
-SYNTAX_ERR1:
-    lda (ZP1L),Y
-    beq SYNTAXERR_END
+    lda #':'
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
-    iny
-    jmp SYNTAX_ERR1     ; END output a ready message
-SYNTAXERR_END:
-    jmp MAIN_LOOP_SETUP
+
+    lda #' '
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+
+    lda CMDADDR1L       ; transfer the address to zero page
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    ldy #$0             ; offset 0
+    lda (ZP1L),Y        ; load the byte
+    sta BLKB2C          ; store input byte
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    jsr SEROUTCRLF
+
+    jmp RETURN_FROM_COMMAND
+
+; **************************************************
+; * CMDOUTBYTE16
+; **************************************************
+CMDOUTBYTE16:
+    jmp RETURN_FROM_COMMAND
+
+; **************************************************
+; * CMDOUTBYTE256
+; **************************************************
+CMDOUTBYTE256:
+    jmp RETURN_FROM_COMMAND
 
 ; **************************************************
 ; * STATE TABLE
@@ -226,6 +324,7 @@ PARSECMD:
 PARSECMDERR:
     lda #$ff
     sta CMDSTATE
+    stz CMDID
     rts
 
 STATE0:
@@ -284,8 +383,19 @@ STATE2_4:
     adc CMDADDR1H,X     ; add the byte (in a) to 
                         ; CMDADDR1H or CMDADDR1L (based on x)
     sta CMDADDR1H,X     ; store a back into CMDADDR1H (or CMDADDR1L)
+
+    lda CMDSTATE            ; 2 or 4
+    cmp #$04                ; if state is 4
+    beq STATE2_4_SETCMDID   ; yes? set cmd id
+
     inc CMDSTATE
-    rts
+    rts                     ; no? return
+
+STATE2_4_SETCMDID:
+    inc CMDSTATE
+    lda #CMDID_OUTBYTE      ; load out byte command
+    sta CMDID               ; store in command id
+    rts                     ; return
 
 STATE5:
     rts
