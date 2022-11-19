@@ -235,9 +235,9 @@ CMDNULL:
     jmp RETURN_FROM_COMMAND
 
 ; **************************************************
-; * CMDOUTBYTE
+; * CMDOUTADDR
 ; **************************************************
-CMDOUTBYTE:
+CMDOUTADDR:
     lda #'$'
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
@@ -270,12 +270,20 @@ CMDOUTBYTE:
     lda #' '
     sta BLKSEROUTBYTE
     jsr SEROUTBYTE
+    rts
+
+; **************************************************
+; * CMDOUTBYTE
+; **************************************************
+CMDOUTBYTE:
+    jsr CMDOUTADDR
 
     lda CMDADDR1L       ; transfer the address to zero page
     sta ZP1L
     lda CMDADDR1H
     sta ZP1H
     ldy #$0             ; offset 0
+
     lda (ZP1L),Y        ; load the byte
     sta BLKB2C          ; store input byte
     jsr B2C
@@ -293,12 +301,69 @@ CMDOUTBYTE:
 ; * CMDOUTBYTE16
 ; **************************************************
 CMDOUTBYTE16:
+    jsr CMDOUTADDR
+
+    lda CMDADDR1L       ; transfer the address to zero page
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    ldy #$0             ; offset 0
+
+  CMDOUTBYTE16A:  
+    lda (ZP1L),Y        ; load the byte
+    sta BLKB2C          ; store input byte
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+
+    lda #' '
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+
+    iny
+    cpy #$10
+    beq CMDOUTBYTE16B
+    jmp CMDOUTBYTE16A
+
+CMDOUTBYTE16B:
+    jsr SEROUTCRLF
     jmp RETURN_FROM_COMMAND
 
 ; **************************************************
 ; * CMDOUTBYTE256
 ; **************************************************
 CMDOUTBYTE256:
+    lda CMDADDR1L
+    and #%11110000      ; truncate to 0x0f
+    sta CMDADDR1L
+    ldx #$10
+
+CMDOUTBYTE256A:
+    phx
+    jsr CMDOUTADDR      ; output the address
+
+    ; OUTPUT 16 BYTES HERE
+
+    jsr SEROUTCRLF
+
+    lda #$10
+    clc
+    adc CMDADDR1L
+    sta CMDADDR1L       ; store lo byte
+    lda CMDADDR1H       ; load hi byte
+    adc #$00            ; add 0 plus carry
+    sta CMDADDR1H
+
+    plx
+    dex
+    beq CMDOUTBYTE256B
+    jmp CMDOUTBYTE256A
+
+CMDOUTBYTE256B:
     jmp RETURN_FROM_COMMAND
 
 ; **************************************************
@@ -310,6 +375,8 @@ STATE2A     .word   STATE2      ; offset 4
 STATE3A     .word   STATE3      ; offset i*2
 STATE4A     .word   STATE4
 STATE5A     .word   STATE5
+STATE6A     .word   STATE6
+STATE7A     .word   STATE7
 
 ; **************************************************
 ; * PARSECMD
@@ -398,6 +465,30 @@ STATE2_4_SETCMDID:
     rts                     ; return
 
 STATE5:
+    lda PCMDINPUT
+    cmp #':'
+    beq STATE5_SETCMDID
+    jmp PARSECMDERR
+
+STATE5_SETCMDID:
+    inc CMDSTATE
+    lda #CMDID_OUTBYTE16
+    sta CMDID
+    rts
+
+STATE6:
+    lda PCMDINPUT
+    cmp #':'
+    beq STATE6_SETCMDID
+    jmp PARSECMDERR
+
+STATE6_SETCMDID:
+    inc CMDSTATE
+    lda #CMDID_OUTBYTE256
+    sta CMDID
+    rts
+
+STATE7:
     rts
 
 ; **************************************************
