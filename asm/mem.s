@@ -346,8 +346,35 @@ CMDOUTBYTE256A:
     phx
     jsr CMDOUTADDR      ; output the address
 
-    ; OUTPUT 16 BYTES HERE
+    ; BEGIN OUTPUT 16 BYTES HERE
+    lda CMDADDR1L       ; transfer the address to zero page
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    ldy #$0             ; offset 0
 
+ CMDOUTBYTE256C:
+    lda (ZP1L),Y        ; load the byte
+    sta BLKB2C          ; store input byte
+    jsr B2C
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+
+    lda #' '
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+
+    iny
+    cpy #$10
+    beq CMDOUTBYTE256D
+    jmp CMDOUTBYTE256C
+    ; END   OUTPUT 16 BYTES HERE
+
+CMDOUTBYTE256D:
     jsr SEROUTCRLF
 
     lda #$10
