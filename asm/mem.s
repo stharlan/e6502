@@ -222,11 +222,13 @@ CMDID_NULL          = $00
 CMDID_OUTBYTE       = $02
 CMDID_OUTBYTE16     = $04
 CMDID_OUTBYTE256    = $06
+CMDID_XEQADDR       = $08
 
 CMD0A       .word   CMDNULL             ; [0] null
 CMD1A       .word   CMDOUTBYTE          ; [2] out byte 1
 CMD2A       .word   CMDOUTBYTE16        ; [4] out byte 16
 CMD3A       .word   CMDOUTBYTE256       ; [6] out byte 256
+CMD4A       .word   CMDXEQADDR          ; [8] execute address       
 
 ; **************************************************
 ; * CMDNULL
@@ -394,6 +396,16 @@ CMDOUTBYTE256B:
     jmp RETURN_FROM_COMMAND
 
 ; **************************************************
+; * CMDXEQADDR
+; **************************************************
+CMDXEQADDR:
+    lda CMDADDR1L       ; transfer the address to zero page
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    jmp (ZP1L)
+
+; **************************************************
 ; * STATE TABLE
 ; **************************************************
 STATE0A     .word   STATE0      ; offset 0
@@ -487,7 +499,20 @@ STATE2_4:
 
 STATE2_4_SETCMDID:
     inc CMDSTATE
+    lda CMDCHAR
+    cmp #'d'                ; dump
+    beq STATE2_4_SETCMDID_D
+    cmp #'x'                ; execute
+    beq STATE2_4_SETCMDID_X
+    jmp PARSECMDERR         ; niether? error
+
+STATE2_4_SETCMDID_D:
     lda #CMDID_OUTBYTE      ; load out byte command
+    sta CMDID               ; store in command id
+    rts                     ; return
+
+STATE2_4_SETCMDID_X:
+    lda #CMDID_XEQADDR      ; load out byte command
     sta CMDID               ; store in command id
     rts                     ; return
 
@@ -499,6 +524,12 @@ STATE5:
 
 STATE5_SETCMDID:
     inc CMDSTATE
+    lda CMDCHAR
+    cmp #'d'
+    beq STATE5_SETCMDID_D
+    jmp PARSECMDERR
+
+STATE5_SETCMDID_D:
     lda #CMDID_OUTBYTE16
     sta CMDID
     rts
@@ -511,6 +542,12 @@ STATE6:
 
 STATE6_SETCMDID:
     inc CMDSTATE
+    lda CMDCHAR
+    cmp #'d'
+    beq STATE6_SETCMDID_D
+    jmp PARSECMDERR
+
+STATE6_SETCMDID_D:
     lda #CMDID_OUTBYTE256
     sta CMDID
     rts
