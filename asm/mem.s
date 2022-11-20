@@ -223,12 +223,14 @@ CMDID_OUTBYTE       = $02
 CMDID_OUTBYTE16     = $04
 CMDID_OUTBYTE256    = $06
 CMDID_XEQADDR       = $08
+CMDID_SETBYTE       = $0A
 
 CMD0A       .word   CMDNULL             ; [0] null
 CMD1A       .word   CMDOUTBYTE          ; [2] out byte 1
 CMD2A       .word   CMDOUTBYTE16        ; [4] out byte 16
 CMD3A       .word   CMDOUTBYTE256       ; [6] out byte 256
 CMD4A       .word   CMDXEQADDR          ; [8] execute address       
+CMD5A       .word   CMDSETBYTE          ; [A] set byte
 
 ; **************************************************
 ; * CMDNULL
@@ -406,6 +408,19 @@ CMDXEQADDR:
     jmp (ZP1L)
 
 ; **************************************************
+; * CMDSETBYTE
+; **************************************************
+CMDSETBYTE:
+    lda CMDADDR1L       ; transfer the address to zero page
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    lda CMDADDR2L
+    ldy #$00
+    sta (ZP1L),Y
+    jmp RETURN_FROM_COMMAND
+
+; **************************************************
 ; * STATE TABLE
 ; **************************************************
 STATE0A     .word   STATE0      ; offset 0
@@ -416,6 +431,10 @@ STATE4A     .word   STATE4
 STATE5A     .word   STATE5
 STATE6A     .word   STATE6
 STATE7A     .word   STATE7
+STATE8A     .word   STATE8
+STATE9A     .word   STATE9
+STATEAA     .word   STATEA
+STATEBA     .word   STATEB
 
 ; **************************************************
 ; * PARSECMD
@@ -498,22 +517,31 @@ STATE2_4:
     rts                     ; no? return
 
 STATE2_4_SETCMDID:
-    inc CMDSTATE
     lda CMDCHAR
     cmp #'d'                ; dump
     beq STATE2_4_SETCMDID_D
     cmp #'x'                ; execute
     beq STATE2_4_SETCMDID_X
+    cmp #'s'
+    beq STATE2_4_SETCMDID_S
     jmp PARSECMDERR         ; niether? error
+
+STATE2_4_SETCMDID_S:
+    lda #CMDID_NULL         ; load out byte command
+    sta CMDID               ; store in command id
+    inc CMDSTATE
+    rts                     ; return
 
 STATE2_4_SETCMDID_D:
     lda #CMDID_OUTBYTE      ; load out byte command
     sta CMDID               ; store in command id
+    inc CMDSTATE
     rts                     ; return
 
 STATE2_4_SETCMDID_X:
     lda #CMDID_XEQADDR      ; load out byte command
     sta CMDID               ; store in command id
+    inc CMDSTATE
     rts                     ; return
 
 STATE5:
@@ -523,15 +551,23 @@ STATE5:
     jmp PARSECMDERR
 
 STATE5_SETCMDID:
-    inc CMDSTATE
     lda CMDCHAR
     cmp #'d'
-    beq STATE5_SETCMDID_D
+    beq STATE5_SETCMDID_D    
+    cmp #'s'
+    beq STATE5_SETCMDID_S
     jmp PARSECMDERR
+
+STATE5_SETCMDID_S:
+    lda #CMDID_NULL
+    sta CMDID
+    inc CMDSTATE
+    rts
 
 STATE5_SETCMDID_D:
     lda #CMDID_OUTBYTE16
     sta CMDID
+    inc CMDSTATE
     rts
 
 STATE6:
@@ -541,18 +577,100 @@ STATE6:
     jmp PARSECMDERR
 
 STATE6_SETCMDID:
-    inc CMDSTATE
     lda CMDCHAR
     cmp #'d'
     beq STATE6_SETCMDID_D
+    cmp #'s'
+    beq STATE6_SETCMDID_S
     jmp PARSECMDERR
+
+STATE6_SETCMDID_S:
+    lda #CMDID_NULL         ; load null command
+    sta CMDID
+    inc CMDSTATE
+    rts
 
 STATE6_SETCMDID_D:
     lda #CMDID_OUTBYTE256
     sta CMDID
+    inc CMDSTATE
     rts
 
+PARSECMDERR1:
+    jmp PARSECMDERR
+
 STATE7:
+STATE8:
+STATE9:
+STATEA:
+    ; 1st char of address $Xxxx
+    ; or 3rd char of address $xxXx
+    lda PCMDINPUT
+    sta BLKHC2B
+    jsr HC2B
+    lda BLKHC2B+1
+    cmp #$10            ; illegal char, must be hex
+    beq PARSECMDERR1
+    lda CMDSTATE
+    cmp #$07
+    beq STATE7_9
+    cmp #$08
+    beq STATE8_A
+    cmp #$09
+    beq STATE7_9
+    cmp #$0a
+    beq STATE8_A
+    jmp PARSECMDERR
+
+STATE7_9:
+    lda CMDSTATE        ; 7 or 9
+    sec
+    sbc #$07            ; 0 or 2
+    lsr                 ; 0 or 1
+    tax
+    lda BLKHC2B+1       ; load the returned byte 0-f
+    asl                 ; shift it left four times
+    asl                 ; to make it the high byte
+    asl
+    asl
+    sta CMDADDR2H,X     ; store byte in command addr offset x
+                        ; offset 0; STATE1 = H
+                        ; offset 1; STATE2 = L
+    inc CMDSTATE
+    rts
+
+STATE8_A:
+    lda CMDSTATE        ; 8 or A
+    sec
+    sbc #$08            ; 0 or 2
+    lsr                 ; 0 or 1
+    tax                 ; transfer index to x
+    lda BLKHC2B+1       ; load the byte
+    clc                 ; clear carry flag
+    adc CMDADDR2H,X     ; add the byte (in a) to 
+                        ; CMDADDR1H or CMDADDR1L (based on x)
+    sta CMDADDR2H,X     ; store a back into CMDADDR1H (or CMDADDR1L)
+
+    lda CMDSTATE            ; 8 or A
+    cmp #$0A                ; if state is A
+    beq STATE8_A_SETCMDID   ; yes? set cmd id
+
+    inc CMDSTATE
+    rts                     ; no? return
+
+STATE8_A_SETCMDID:
+    lda CMDCHAR
+    cmp #'s'
+    beq STATE8_A_SETCMDID_S
+    jmp PARSECMDERR
+
+STATE8_A_SETCMDID_S:
+    lda #CMDID_SETBYTE
+    sta CMDID
+    inc CMDSTATE
+    rts
+
+STATEB:
     rts
 
 ; **************************************************
