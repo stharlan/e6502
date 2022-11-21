@@ -61,6 +61,7 @@ CMDADDR2H       = $100c     ; command addr 2 hi byte
 CMDADDR2L       = $100d     ; command addr 2 lo byte
 PCMDINPUT       = $100e     ; parse command char input
 CMDID           = $100f     ; command id
+ACTIVITYFLAG    = $1010     ; activity flag
 
     ; Memory map:
     ; $0000 - $7fff = RAM
@@ -89,6 +90,7 @@ RESET:
     ; SETUP
     stz CMDSTATE
     stz CMDID
+    stz ACTIVITYFLAG
 
     lda #%11110111      ; bottom 3 bits are output
                         ; and top 4 bits
@@ -119,6 +121,10 @@ RESET3:
 
 MAIN_LOOP_SETUP:
     stz VIADDRB         ; port b input
+    stz ACTIVITYFLAG
+    lda VIAPORTA
+    and #%11011111      ; clear bit 2
+    sta VIAPORTA
 
 MAIN_LOOP:
 
@@ -130,6 +136,13 @@ MAIN_LOOP:
     jmp MAIN_LOOP       ; no? loop again
 
 ECHOCHAR:
+
+    lda #%00100000
+    sta ACTIVITYFLAG
+    lda VIAPORTA
+    ora #%00100000      ; set bit 2
+    sta VIAPORTA
+
     lda #%11111111      ; port b is all output
     sta VIADDRB
 
@@ -788,6 +801,7 @@ SERINBYTE:
 
     ; read a byte from Arduino
     lda #%10000101      ; Arduino write/chip enable/data
+    ora ACTIVITYFLAG    ; set activity flag as necessary
     sta VIAPORTA
     wai                 ; wait for interrupt
 
@@ -801,6 +815,7 @@ SERINBYTE:
 
 SERINBYTE2:
     lda #%10000010      ; reset CE
+    ora ACTIVITYFLAG
     sta VIAPORTA
     rts
 
@@ -812,10 +827,12 @@ SEROUTBYTE:
     lda BLKSEROUTBYTE   ; get char
     sta VIAPORTB        ; put a value on port B
     lda #%11000001      ; Arduino read/chip enable/data
+    ora ACTIVITYFLAG
     sta VIAPORTA        ; trigger arduino interrupt
     wai                 ; wait for 6502 interrupt
                         ; will be triggered by Arduino
     lda #%10000010      ; reset CE
+    ora ACTIVITYFLAG
     sta VIAPORTA
     rts
 
