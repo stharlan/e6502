@@ -90,11 +90,12 @@ RESET:
     stz CMDSTATE
     stz CMDID
 
-    lda #%00000111      ; bottom 3 bits are output
+    lda #%11110111      ; bottom 3 bits are output
+                        ; and top 4 bits
     sta VIADDRA         ; these are 0=RS, 1=CE and 2=RW, 3=OUTR (input)
     lda #%11111111      ; port b is all output (initially)
     sta VIADDRB
-    lda #%00000010      ; Arduino read/ce disable/instr
+    lda #%10000010      ; Arduino read/ce disable/instr
     sta VIAPORTA        ; zero out PORTA
     stz VIAPORTB        ; set port b to zero's
 
@@ -786,7 +787,7 @@ SERINBYTE:
     sta BLKSERINBYTE+1
 
     ; read a byte from Arduino
-    lda #%00000101      ; Arduino write/chip enable/data
+    lda #%10000101      ; Arduino write/chip enable/data
     sta VIAPORTA
     wai                 ; wait for interrupt
 
@@ -799,7 +800,7 @@ SERINBYTE:
     inc BLKSERINBYTE    ; set flag (> 0)
 
 SERINBYTE2:
-    lda #%00000010      ; reset CE
+    lda #%10000010      ; reset CE
     sta VIAPORTA
     rts
 
@@ -810,11 +811,11 @@ SEROUTBYTE:
     ; write a byte to Arduino: SUCCESS
     lda BLKSEROUTBYTE   ; get char
     sta VIAPORTB        ; put a value on port B
-    lda #%00000001      ; Arduino read/chip enable/data
+    lda #%10000001      ; Arduino read/chip enable/data
     sta VIAPORTA        ; trigger arduino interrupt
     wai                 ; wait for 6502 interrupt
                         ; will be triggered by Arduino
-    lda #%00000010      ; reset CE
+    lda #%10000010      ; reset CE
     sta VIAPORTA
     rts
 
