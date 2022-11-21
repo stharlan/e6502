@@ -96,7 +96,7 @@ RESET:
     lda #%11111111      ; port b is all output (initially)
     sta VIADDRB
     lda #%10000010      ; Arduino read/ce disable/instr
-    sta VIAPORTA        ; zero out PORTA
+    sta VIAPORTA        ; reset port a
     stz VIAPORTB        ; set port b to zero's
 
     cli                 ; clear interrupt disable flag
@@ -811,7 +811,7 @@ SEROUTBYTE:
     ; write a byte to Arduino: SUCCESS
     lda BLKSEROUTBYTE   ; get char
     sta VIAPORTB        ; put a value on port B
-    lda #%10000001      ; Arduino read/chip enable/data
+    lda #%11000001      ; Arduino read/chip enable/data
     sta VIAPORTA        ; trigger arduino interrupt
     wai                 ; wait for 6502 interrupt
                         ; will be triggered by Arduino
