@@ -238,6 +238,7 @@ CMDID_OUTBYTE16     = $04
 CMDID_OUTBYTE256    = $06
 CMDID_XEQADDR       = $08
 CMDID_SETBYTE       = $0A
+CMDID_CHKSUM        = $0C
 
 CMD0A       .word   CMDNULL             ; [0] null
 CMD1A       .word   CMDOUTBYTE          ; [2] out byte 1
@@ -245,6 +246,7 @@ CMD2A       .word   CMDOUTBYTE16        ; [4] out byte 16
 CMD3A       .word   CMDOUTBYTE256       ; [6] out byte 256
 CMD4A       .word   CMDXEQADDR          ; [8] execute address       
 CMD5A       .word   CMDSETBYTE          ; [A] set byte
+CMD6A       .word   CMDCHKSUM           ; [C] checksum
 
 ; **************************************************
 ; * CMDNULL
@@ -435,6 +437,62 @@ CMDSETBYTE:
     jmp RETURN_FROM_COMMAND
 
 ; **************************************************
+; * CMDCHKSUM
+; **************************************************
+CMDCHKSUM:
+    lda CMDADDR1L
+    sta ZP1L
+    lda CMDADDR1H
+    sta ZP1H
+    lda #$00                    ; start sum at zero
+    ldy #$00                    ; always offset 0
+    clc                         ; clear carry flag
+    php                         ; push carry flag
+    pha                         ; push a
+CMDCHKSUMD:
+    pla                         ; get a
+    plp                         ; get carry flag
+    adc (ZP1L),Y                ; sum a and byte in mem, including carry flag
+    php                         ; save carry flag
+    pha                         ; save a
+    lda ZP1H
+    cmp CMDADDR2H
+    beq CMDCHKSUMA              ; hi byte is equal
+    jmp CMDCHKSUME
+CMDCHKSUMA:
+    lda ZP1L
+    cmp CMDADDR2L
+    beq CMDCHKSUMB              ; lo byte is equal
+CMDCHKSUME:
+    clc                         ; clear carry flag
+    lda #$01                    ; load 1 in to a
+    adc ZP1L                    ; add a to ZP1L
+    sta ZP1L
+    lda #$00
+    adc ZP1H
+    sta ZP1H
+    jmp CMDCHKSUMD
+CMDCHKSUMB:
+    ; HI BYTE AND LOW BYTE IS EQUAL
+    ; DONE HERE
+    pla
+    plp
+    adc #$00                    ; if carry flag is set, one more add
+    sta BLKB2C
+    jsr B2C                     ; convert byte to chars
+    lda #'$'                    ; print a $
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE
+    lda BLKB2C+2
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE              ; output hi char
+    lda BLKB2C+1
+    sta BLKSEROUTBYTE
+    jsr SEROUTBYTE              ; output lo char
+    jsr SEROUTCRLF              ; output crlf
+    jmp RETURN_FROM_COMMAND     ; return
+
+; **************************************************
 ; * STATE TABLE
 ; **************************************************
 STATE0A     .word   STATE0      ; offset 0
@@ -459,20 +517,17 @@ PARSECMD:
     asl                 ; left shift 1 to get offset
     tax
     jmp (STATE0A,X)     ; jump to the state routine
-
 PARSECMDERR:
     lda #$ff
     sta CMDSTATE
     stz CMDID
     rts
-
 STATE0:
     ; COMMAND CHAR
     lda PCMDINPUT
     sta CMDCHAR
     inc CMDSTATE        ; state1
     rts
-
 STATE1:
 STATE2:
 STATE3:
@@ -495,7 +550,6 @@ STATE4:
     cmp #$04
     beq STATE2_4
     jmp PARSECMDERR
-    
 STATE1_3:
     lda CMDSTATE        ; 1 or 3
     dec                 ; decrement cmdstate, now 0 or 2
@@ -511,7 +565,6 @@ STATE1_3:
                         ; offset 1; STATE2 = L
     inc CMDSTATE
     rts
-
 STATE2_4:
     lda CMDSTATE        ; 2 or 4
     lsr                 ; div by 2; 1 or 2
@@ -529,7 +582,6 @@ STATE2_4:
 
     inc CMDSTATE
     rts                     ; no? return
-
 STATE2_4_SETCMDID:
     lda CMDCHAR
     cmp #'d'                ; dump
@@ -538,81 +590,77 @@ STATE2_4_SETCMDID:
     beq STATE2_4_SETCMDID_X
     cmp #'s'
     beq STATE2_4_SETCMDID_S
+    cmp #'c'
+    beq STATE2_4_SETCMDID_C
     jmp PARSECMDERR         ; niether? error
-
 STATE2_4_SETCMDID_S:
+STATE2_4_SETCMDID_C:
     lda #CMDID_NULL         ; load out byte command
     sta CMDID               ; store in command id
     inc CMDSTATE
     rts                     ; return
-
 STATE2_4_SETCMDID_D:
     lda #CMDID_OUTBYTE      ; load out byte command
     sta CMDID               ; store in command id
     inc CMDSTATE
     rts                     ; return
-
 STATE2_4_SETCMDID_X:
     lda #CMDID_XEQADDR      ; load out byte command
     sta CMDID               ; store in command id
     inc CMDSTATE
     rts                     ; return
-
 STATE5:
     lda PCMDINPUT
     cmp #':'
     beq STATE5_SETCMDID
     jmp PARSECMDERR
-
 STATE5_SETCMDID:
     lda CMDCHAR
     cmp #'d'
     beq STATE5_SETCMDID_D    
     cmp #'s'
     beq STATE5_SETCMDID_S
+    cmp #'c'
+    beq STATE5_SETCMDID_C
     jmp PARSECMDERR
-
 STATE5_SETCMDID_S:
+STATE5_SETCMDID_C:
     lda #CMDID_NULL
     sta CMDID
     inc CMDSTATE
     rts
-
 STATE5_SETCMDID_D:
     lda #CMDID_OUTBYTE16
     sta CMDID
     inc CMDSTATE
     rts
-
 STATE6:
     lda PCMDINPUT
     cmp #':'
     beq STATE6_SETCMDID
     jmp PARSECMDERR
-
 STATE6_SETCMDID:
     lda CMDCHAR
     cmp #'d'
     beq STATE6_SETCMDID_D
     cmp #'s'
     beq STATE6_SETCMDID_S
+    cmp #'c'
+    beq STATE6_SETCMDID_C
     jmp PARSECMDERR
-
 STATE6_SETCMDID_S:
+STATE6_SETCMDID_C:
     lda #CMDID_NULL         ; load null command
     sta CMDID
     inc CMDSTATE
     rts
-
 STATE6_SETCMDID_D:
     lda #CMDID_OUTBYTE256
     sta CMDID
     inc CMDSTATE
     rts
-
 PARSECMDERR1:
     jmp PARSECMDERR
-
 STATE7:
 STATE8:
 STATE9:
@@ -635,7 +683,6 @@ STATEA:
     cmp #$0a
     beq STATE8_A
     jmp PARSECMDERR
-
 STATE7_9:
     lda CMDSTATE        ; 7 or 9
     sec
@@ -652,7 +699,6 @@ STATE7_9:
                         ; offset 1; STATE2 = L
     inc CMDSTATE
     rts
-
 STATE8_A:
     lda CMDSTATE        ; 8 or A
     sec
@@ -671,19 +717,23 @@ STATE8_A:
 
     inc CMDSTATE
     rts                     ; no? return
-
 STATE8_A_SETCMDID:
     lda CMDCHAR
     cmp #'s'
     beq STATE8_A_SETCMDID_S
+    cmp #'c'
+    beq STATE8_A_SETCMDID_C
     jmp PARSECMDERR
-
 STATE8_A_SETCMDID_S:
     lda #CMDID_SETBYTE
     sta CMDID
     inc CMDSTATE
     rts
-
+STATE8_A_SETCMDID_C:
+    lda #CMDID_CHKSUM
+    sta CMDID
+    inc CMDSTATE
+    rts
 STATEB:
     rts
 
